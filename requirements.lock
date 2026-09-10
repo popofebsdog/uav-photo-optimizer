@@ -1,0 +1,4 @@
+# Validated runtime dependencies, Python 3.11 / macOS arm64.
+# ExifTool is installed separately; verified executable version: 13.55.
+certifi==2026.7.22
+pyproj==3.7.2

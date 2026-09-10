@@ -1,0 +1,7 @@
+#!/bin/sh
+# macOS launcher: Python editable installations in Chinese paths need UTF-8 locale.
+set -eu
+export LC_ALL=en_US.UTF-8
+export PYTHONUTF8=1
+project_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+exec "$project_dir/.venv/bin/uav-optimize" "$@"
