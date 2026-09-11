@@ -1,0 +1,20 @@
+{
+  "height_mode": "gps_minus_dsm_trial",
+  "require_dsm": true,
+  "gps_max_step_m": 2.0,
+  "gps_max_window_range_m": 5.0,
+  "terrain_max_slope_deg": 10.0,
+  "terrain_max_relief_m": 10.0,
+  "overlap_threshold": 0.7,
+  "min_retained_forward_overlap": 0.7,
+  "camera_profiles": {
+    "XT701": {
+      "sensor_width_mm": 6.4,
+      "sensor_height_mm": 4.8,
+      "image_width": 8000,
+      "image_height": 6000,
+      "angle_convention": "autel_positive_down",
+      "source": "Original image EXIF: width/31750*25.4 mm and height/31750*25.4 mm. Autel SDK pitch is positive down."
+    }
+  }
+}

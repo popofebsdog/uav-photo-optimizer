@@ -17,6 +17,7 @@ from . import __version__
 from .config import load_config
 from .metadata import apply_heights, discover, scan
 from .selection import select
+from .terrain import apply_dsm
 
 
 def write_json(path, value):
@@ -79,12 +80,15 @@ def run(args):
     config = load_config(args.config)
     if args.min_overlap is not None:
         config = replace(config, min_retained_forward_overlap=args.min_overlap)
+    if (config.require_dsm or config.height_mode == "gps_minus_dsm_trial") and args.dsm is None:
+        raise ValueError("this configuration requires --dsm")
     photos, ignored = discover(root)
     if not photos:
         raise ValueError("no supported photos found")
     print(f"Scanning {len(photos)} photos…", file=sys.stderr)
     exiftool_version = scan(root, photos, config)
     apply_heights(photos, args.heights)
+    dsm_info = apply_dsm(photos, args.dsm, config) if args.dsm else None
     triggers = select(photos, config, args.force)
     selected = [p for p in photos if p.decision != "SKIP"]
     raw_bytes = sum(p.size_bytes for p in photos)
@@ -93,6 +97,16 @@ def run(args):
         "session_id": str(uuid.uuid4()), "created_at": datetime.now(timezone.utc).isoformat(),
         "algorithm_version": __version__, "exiftool_version": exiftool_version,
         "config_snapshot": config.snapshot(), "height_csv_sha256": fingerprint(args.heights),
+        "result_classification": {
+            "gps_proxy_trial": "EXPERIMENTAL_GPS_PROXY",
+            "gps_minus_dsm_trial": "EXPERIMENTAL_GPS_MINUS_DSM_UNCONFIRMED_VERTICAL_DATUM",
+        }.get(config.height_mode, "METADATA_GEOMETRY_ONLY"),
+        "height_assumption": {
+            "gps_proxy_trial": "GPS altitude used as footprint height; not measured AGL; actual overlap unverified",
+            "gps_minus_dsm_trial": "Estimated AGL = GPS altitude - DSM center elevation; vertical datum compatibility is unconfirmed; actual overlap unverified",
+        }.get(config.height_mode, "explicit AGL evidence required"),
+        "dsm": dsm_info,
+        "dsm_status_counts": dict(Counter(p.dsm_status for p in photos)),
         **triggers, "raw_photo_count": len(photos), "selected_photo_count": len(selected),
         "skipped_photo_count": len(photos) - len(selected), "raw_total_size_bytes": raw_bytes,
         "selected_total_size_bytes": selected_bytes, "skipped_total_size_bytes": raw_bytes - selected_bytes,
@@ -143,6 +157,7 @@ def main(argv=None):
     parser.add_argument("--output", type=Path, required=True, help="new report/output directory outside source")
     parser.add_argument("--config", type=Path, help="JSON config; defaults include 80%% minimum overlap")
     parser.add_argument("--heights", type=Path, help="CSV: relative_path,agl_m,source; explicit per-image height above ground")
+    parser.add_argument("--dsm", type=Path, help="projected metre-unit GeoTIFF for local slope/relief protection; does not infer vertical datum")
     parser.add_argument("--min-overlap", type=float, help="minimum retained overlap as fraction, e.g. 0.8 or 0.6")
     parser.add_argument("--force", action="store_true", help="run selection below 3 GB / 1000 images; does not bypass safety checks")
     parser.add_argument("--copy", action="store_true", help="copy selected photos to output/selected; preserves relative paths")

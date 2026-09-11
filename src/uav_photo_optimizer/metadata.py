@@ -45,6 +45,14 @@ class Photo:
     vendor_pitch: float | None = None
     vendor_yaw: float | None = None
     vendor_vertical_reference: str | None = None
+    estimation_height_m: float | None = None
+    estimation_height_source: str | None = None
+    angle_source: str | None = None
+    gps_height_stable: bool | None = None
+    dsm_status: str = "NOT_REQUESTED"
+    dsm_surface_height_m: float | None = None
+    dsm_slope_deg: float | None = None
+    dsm_relief_m: float | None = None
     strip_id: int | None = None
     decision: str = "BYPASS_KEEP"
     reasons: list[str] = field(default_factory=list)

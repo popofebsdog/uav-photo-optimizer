@@ -1,0 +1,17 @@
+{
+  "height_mode": "gps_proxy_trial",
+  "gps_max_step_m": 2.0,
+  "gps_max_window_range_m": 5.0,
+  "overlap_threshold": 0.8,
+  "min_retained_forward_overlap": 0.8,
+  "camera_profiles": {
+    "XT701": {
+      "sensor_width_mm": 6.4,
+      "sensor_height_mm": 4.8,
+      "image_width": 8000,
+      "image_height": 6000,
+      "angle_convention": "autel_positive_down",
+      "source": "804 original images: 8000/31750*25.4=6.4 mm; 6000/31750*25.4=4.8 mm; EXIF focal-plane resolution unit 2 (inch). Autel SDK: pitch 90 faces ground."
+    }
+  }
+}

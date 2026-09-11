@@ -79,7 +79,7 @@ class SelectionTests(unittest.TestCase):
         self.assertNotEqual(items[3].strip_id, items[5].strip_id)
 
     def test_cross_track_and_oblique_rejected(self):
-        self.assertIsNone(overlap(photo(0), photo(1, 5, east=30), config()))
+        self.assertIsNone(overlap(photo(0), photo(1, 15, east=30), config()))
         p = photo(1, 5)
         p.pitch = -45
         self.assertIsNone(overlap(photo(0), p, config()))

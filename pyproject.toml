@@ -4,10 +4,10 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "uav-photo-optimizer"
-version = "0.1.0"
+version = "0.2.0"
 description = "Local metadata-based UAV photo selection with conservative link protection"
 requires-python = ">=3.11"
-dependencies = ["pyproj>=3.7,<4"]
+dependencies = ["pyproj>=3.7,<4", "rasterio>=1.4,<2", "numpy>=1.24,<3"]
 
 [project.scripts]
 uav-optimize = "uav_photo_optimizer.cli:main"
