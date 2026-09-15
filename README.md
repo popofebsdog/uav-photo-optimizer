@@ -6,6 +6,13 @@
 
 ## 安裝
 
+從 GitHub 取得專案：
+
+```sh
+git clone https://github.com/popofebsdog/uav-photo-optimizer.git
+cd uav-photo-optimizer
+```
+
 在本專案目錄執行（macOS）：
 
 ```sh
@@ -130,8 +137,7 @@ uav-photo-optimizer/
 ├── scripts/                  # 大地起伏模型可重現轉檔工具
 ├── tests/
 ├── docs/                   # 設計、驗證與版本紀錄
-├── .Codex/plans/
 └── outputs/                # 本機執行結果，Git 忽略
 ```
 
-原始照片位於專案外。`data/`、`outputs/`、虛擬環境、照片及 `.env` 都不進 Git。此專案使用本機 Git，沒有建立遠端或推送。
+原始照片位於專案外。`data/`、`outputs/`、虛擬環境、照片及 `.env` 都不進 Git。GitHub 專案只包含程式碼、設定範例、測試與文件。
