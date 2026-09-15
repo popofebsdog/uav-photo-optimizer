@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.5.0 — 2026-09-15
+
+- Added strict TWHyGEO2014 geoid-grid sampling and `GPS ellipsoidal height - N - TWVD2001 DSM` geometry height.
+- Fails closed for grid metadata mismatch and retains photos with missing/outside geoid samples or non-positive corrected height.
+- Records DSM/geoid datum declarations, formulas, file hashes and redistributed-source provenance in reports.
+- Added a reproducible QPS LLDLLD-to-GeoTIFF converter and a corrected XT701 70% configuration.
+- Retained the uncorrected GPS-minus-DSM trial mode solely for reproducibility.
+
 ## 0.4.0 — 2026-09-15
 
 - Keeps adaptive forward-overlap reduction on unpaired or originally uncertain strips instead of restoring every candidate on the strip.

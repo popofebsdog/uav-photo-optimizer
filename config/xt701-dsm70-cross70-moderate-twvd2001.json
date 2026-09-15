@@ -1,0 +1,26 @@
+{
+  "height_mode": "gps_geoid_dsm",
+  "require_dsm": true,
+  "dsm_vertical_datum": "TWVD2001",
+  "geoid_sha256": "ae97de21c4601d81a7223ba57ef95fb63e4a366f518e113889ebd6a99b82b223",
+  "gps_max_step_m": 2.0,
+  "gps_max_window_range_m": 5.0,
+  "terrain_max_slope_deg": 15.0,
+  "terrain_max_relief_m": 20.0,
+  "cross_strip_enabled": true,
+  "min_retained_side_overlap": 0.7,
+  "cross_strip_min_separation_m": 5.0,
+  "cross_strip_max_time_gap_seconds": 1800.0,
+  "overlap_threshold": 0.7,
+  "min_retained_forward_overlap": 0.7,
+  "camera_profiles": {
+    "XT701": {
+      "sensor_width_mm": 6.4,
+      "sensor_height_mm": 4.8,
+      "image_width": 8000,
+      "image_height": 6000,
+      "angle_convention": "autel_positive_down",
+      "source": "Original image EXIF: width/31750*25.4 mm and height/31750*25.4 mm. Autel SDK pitch is positive down. Moderate terrain policy is an explicit trial variant."
+    }
+  }
+}

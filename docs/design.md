@@ -1,4 +1,4 @@
-# Design decisions — 0.4.0
+# Design decisions — 0.5.0
 
 Source specification: parent-folder UDAS VibePrompt and section 71 of the modeling-link supplement. User approved an independent local tool and a configurable initial minimum retained forward overlap of 80%.
 
@@ -26,8 +26,19 @@ Source specification: parent-folder UDAS VibePrompt and section 71 of the modeli
 16. The global side status cannot be PASS while any retained photo is outside the evaluated subset. A separate reduction-subset status reports whether every retained anchor on strips that still contain skipped candidates passed side coverage.
 17. Strip time, camera identity, heading and conservative expanded spatial envelopes prune impossible comparisons before photo-pair geometry. Shared geodesic helpers live in `geometry.py`, avoiding a selection/coverage import cycle.
 
+## TWVD2001 height conversion
+
+18. `gps_geoid_dsm` computes `H = h - N` and `AGL = H - DSM`. GPS coordinates are transformed from WGS84 to the TWD97 horizontal datum of the geoid grid before bilinear point-grid interpolation.
+19. A geoid GeoTIFF is accepted only when its full-file SHA-256 matches the config and its tags explicitly identify TWVD2001, metre units, `N = h - H`, point-pixel semantics and source provenance. Grid mismatch is a run error; per-photo missing/outside values, unconfirmed ellipsoidal GPS-height semantics and non-positive AGL retain that photo.
+20. The DSM vertical datum is an explicit config declaration because the supplied GeoTIFF has no encoded vertical CRS. The report records that limitation, both raster hashes, the redistributed archive hash, source URL and applied formula.
+21. The included converter targets QPS's public pre-release redistribution and does not claim that file is the official NLSC original. Its LLDLLD grid is written as a north-up EPSG:3824 point grid without altering values.
+
 ## Upstream documentation
 
+- https://data.gov.tw/dataset/169808
+- https://www.nlsc.gov.tw/cp.aspx?n=1483
+- https://www.nlsc.gov.tw/cp.aspx?n=1551
+- https://qpssoftware.scrollhelp.site/geodeticui/download-pre-released-vertical-models
 - https://exiftool.org/TagNames/DJI.html
 - https://exiftool.org/TagNames/XMP.html
 - https://pyproj4.github.io/pyproj/stable/api/geod.html

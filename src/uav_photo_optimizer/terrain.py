@@ -60,14 +60,17 @@ def apply_dsm(photos, path: Path, config):
             p.dsm_slope_deg = slope
             p.dsm_relief_m = relief
             p.dsm_status = "GENTLE" if slope <= config.terrain_max_slope_deg and relief <= config.terrain_max_relief_m else "ROUGH"
-        uses_height_difference = config.height_mode == "gps_minus_dsm_trial"
+        uses_height_difference = config.height_mode in ("gps_minus_dsm_trial", "gps_geoid_dsm")
+        corrected_height = config.height_mode == "gps_geoid_dsm"
         info = {
             "filename": path.name, "sha256": digest.hexdigest(), "size_bytes": before.st_size,
             "horizontal_crs_wkt": crs.to_wkt(), "resolution_m": [dx, dy],
             "width": ds.width, "height": ds.height, "nodata": ds.nodata,
-            "vertical_datum_status": "UNCONFIRMED_EXPERIMENTAL_SUBTRACTION" if uses_height_difference else "UNCONFIRMED_NOT_USED_FOR_AGL",
-            "usage": "LOCAL_TERRAIN_GATE_AND_EXPERIMENTAL_GPS_MINUS_DSM_HEIGHT" if uses_height_difference else "LOCAL_TERRAIN_GATE_ONLY",
-            "height_formula": "GPSAltitude - DSM_center_elevation" if uses_height_difference else None,
+            "declared_vertical_datum": config.dsm_vertical_datum,
+            "vertical_datum_basis": "Explicit configuration declaration; the GeoTIFF itself has no encoded vertical CRS",
+            "vertical_datum_status": "CONFIG_DECLARED_TWVD2001_MATCHES_GEOID_TARGET" if corrected_height else ("UNCONFIRMED_EXPERIMENTAL_SUBTRACTION" if uses_height_difference else "UNCONFIRMED_NOT_USED_FOR_AGL"),
+            "usage": "LOCAL_TERRAIN_GATE_AND_TWVD2001_AGL_HEIGHT" if corrected_height else ("LOCAL_TERRAIN_GATE_AND_EXPERIMENTAL_GPS_MINUS_DSM_HEIGHT" if uses_height_difference else "LOCAL_TERRAIN_GATE_ONLY"),
+            "height_formula": "GPSAltitude - geoid_undulation - DSM_center_elevation" if corrected_height else ("GPSAltitude - DSM_center_elevation" if uses_height_difference else None),
             "window_cells": [3, 3],
             "limitation": "Local neighborhood classification, not full footprint terrain projection or occlusion validation",
         }

@@ -8,7 +8,7 @@ Covered: exact OR thresholds, 80% dense-strip selection, 60% override, A/B/C res
 
 Version 0.2.0 additionally covers projected DSM validation and masking, Horn slope/relief, rough/missing terrain protection, explicit GPS-minus-DSM estimates, GPS-height-change protection, 70% selection, sideways flight, hover noise and last-safe-candidate restoration.
 
-Current release result: 44 tests passed, including repeated-mission isolation, global false-PASS prevention, conservative spatial pruning, cross-strip restoration, ExifTool timeout and vendor-field normalization tests.
+Current release result: 52 tests passed, including repeated-mission isolation, global false-PASS prevention, conservative spatial pruning, cross-strip restoration, asymmetric geoid interpolation, converter orientation, pinned hashes, datum/GPS-height-reference validation and fail-closed behavior, ExifTool timeout and vendor-field normalization tests.
 
 Synthetic geometry tests are deterministic; they do not establish real photogrammetric quality.
 
@@ -85,3 +85,19 @@ Version 0.4.0 reran the same 804-photo moderate 15°/20 m, forward 70%, side 70%
 - Manifest counts, byte totals and `selected-files.json` were independently cross-checked against the summary. Copy was not requested and source photos were unchanged.
 
 The remaining gap between 684 selected photos and the 402-photo empirical baseline is therefore dominated by evidence eligibility, not by the adaptive forward-spacing rule. Relaxing that boundary would require an explicit dataset-specific validated override or image/model-quality evidence; it must not become a default for other missions.
+
+## TWVD2001-corrected height run — 2026-09-15
+
+Version 0.5.0 adds `gps_geoid_dsm`: `H = h - N`, followed by `AGL = H - H_DSM`. The supplied 20 m DSM is explicitly declared TWVD2001 based on its official catalog metadata; because the GeoTIFF itself contains no vertical CRS, the report preserves this as a declaration rather than claiming an embedded-datum check. The geoid input was converted from QPS's public TWHyGEO2014 pre-release redistribution; it is not described as the official NLSC original.
+
+- QPS source ZIP SHA-256: `2bbdc5e1684a17e9b74448c6e0686b1cd4a17dfdc19bc3fda0019fb33563f249`; converted GeoTIFF SHA-256: `ae97de21c4601d81a7223ba57ef95fb63e4a366f518e113889ebd6a99b82b223`.
+- 802 photos had usable geoid samples; the two invalid `(0,0)` GPS coordinates were outside both DSM and geoid coverage and remained protected.
+- Geoid undulation ranged from 23.0813 m to 24.3628 m, averaging 23.4530 m. Corrected AGL ranged from 6.2504 m to 143.4216 m, averaging 55.8186 m.
+- 804 input photos; 707 selected and 97 marked `SKIP`; 2,301,586,100 bytes marked skippable: 12.065% of photos and 10.213% of storage.
+- The geometry-eligible subset remained 182 photos: 85 retained and 97 skipped. Cross-strip protection restored two candidates.
+- Fifty-three retained forward links passed, with minimum confirmed overlap 70.635%. Four original retained links were below 70%; no photos were skipped across those original gaps, which remain explicitly reported as `ORIGINAL_LINK_GAP_OR_UNCERTAINTY`.
+- Forty retained points had cross-strip `PASS`; minimum confirmed side overlap was 70.098%. Forty-five eligible retained points remained unpaired or uncertain. Global and reduction-subset status therefore remain `GAPS_OR_UNCERTAINTY`, not a fabricated PASS.
+- Relative to the uncorrected v0.4.0 run, the corrected footprint height is lower by the local `N` (23.4530 m mean). The selector consequently keeps 23 more photos and marks 552,295,053 fewer bytes skippable.
+- Report-only output is under `outputs/dsm70-cross70-moderate-twvd2001-005/`; no copy was requested and source photos were unchanged.
+
+This removes the known ellipsoidal-versus-orthometric subtraction error. It still does not provide image matching, footprint-wide terrain/occlusion projection or Metashape A/B quality validation, so `SKIP` remains a modeling candidate rather than permission to delete originals.

@@ -23,6 +23,7 @@ def prepare(photos, config):
         sources = {
             "gps_proxy_trial": "GPS_ALTITUDE_PROXY_NOT_AGL",
             "gps_minus_dsm_trial": "GPS_MINUS_DSM_VERTICAL_DATUM_UNCONFIRMED",
+            "gps_geoid_dsm": "GPS_ELLIPSOIDAL_MINUS_GEOID_MINUS_DSM_TWVD2001",
         }
         p.estimation_height_source = sources.get(config.height_mode, p.height_source)
         groups.setdefault((p.model, p.serial), []).append(p)
@@ -59,6 +60,10 @@ def eligibility(p: Photo, config: Config) -> str | None:
             return "TERRAIN_CHANGE_PROTECTION"
         if p.dsm_status != "GENTLE":
             return "DSM_DATA_UNAVAILABLE"
+    if config.height_mode == "gps_geoid_dsm" and p.geoid_status != "AVAILABLE":
+        return "GEOID_DATA_UNAVAILABLE"
+    if config.height_mode == "gps_geoid_dsm" and (p.vendor_vertical_reference or "").strip().lower() != "ellipsoidal":
+        return "GPS_VERTICAL_REFERENCE_UNCONFIRMED"
     if p.latitude is None or p.longitude is None or not -90 <= p.latitude <= 90 or not -180 <= p.longitude <= 180:
         return "GPS_INVALID"
     if p.timestamp is None:
@@ -89,7 +94,7 @@ def overlap(a: Photo, b: Photo, config: Config) -> float | None:
     if eligibility(a, config) or eligibility(b, config) or (a.model, a.serial, a.focal_mm) != (b.model, b.serial, b.focal_mm):
         return None
     ha, hb = geometry_height(a, config), geometry_height(b, config)
-    if config.height_mode != "gps_minus_dsm_trial" and abs(ha - hb) / min(ha, hb) > config.max_height_change_ratio:
+    if config.height_mode not in ("gps_minus_dsm_trial", "gps_geoid_dsm") and abs(ha - hb) / min(ha, hb) > config.max_height_change_ratio:
         return None
     if config.height_mode == "gps_proxy_trial" and abs(ha - hb) > config.gps_max_step_m:
         return None

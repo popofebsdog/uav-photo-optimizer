@@ -13,6 +13,8 @@ class Config:
     gps_max_step_m: float = 2.0
     gps_max_window_range_m: float = 5.0
     require_dsm: bool = False
+    dsm_vertical_datum: str | None = None
+    geoid_sha256: str | None = None
     terrain_max_slope_deg: float = 10.0
     terrain_max_relief_m: float = 10.0
     cross_strip_enabled: bool = False
@@ -36,16 +38,27 @@ class Config:
     camera_profiles: dict = field(default_factory=dict)
 
     def __post_init__(self):
-        if self.height_mode not in ("strict_agl", "gps_proxy_trial", "gps_minus_dsm_trial"):
-            raise ValueError("height_mode must be strict_agl, gps_proxy_trial or gps_minus_dsm_trial")
+        modes = ("strict_agl", "gps_proxy_trial", "gps_minus_dsm_trial", "gps_geoid_dsm")
+        if self.height_mode not in modes:
+            raise ValueError(f"height_mode must be one of {', '.join(modes)}")
         if type(self.enabled) is not bool:
             raise ValueError("enabled must be boolean")
         if type(self.require_dsm) is not bool:
             raise ValueError("require_dsm must be boolean")
         if type(self.cross_strip_enabled) is not bool:
             raise ValueError("cross_strip_enabled must be boolean")
-        if self.height_mode == "gps_minus_dsm_trial" and not self.require_dsm:
-            raise ValueError("gps_minus_dsm_trial requires require_dsm=true")
+        if self.height_mode in ("gps_minus_dsm_trial", "gps_geoid_dsm") and not self.require_dsm:
+            raise ValueError(f"{self.height_mode} requires require_dsm=true")
+        if self.dsm_vertical_datum is not None and (not isinstance(self.dsm_vertical_datum, str) or not self.dsm_vertical_datum.strip()):
+            raise ValueError("dsm_vertical_datum must be a non-empty string or null")
+        if self.height_mode == "gps_geoid_dsm" and self.dsm_vertical_datum != "TWVD2001":
+            raise ValueError("gps_geoid_dsm requires dsm_vertical_datum=TWVD2001")
+        if self.geoid_sha256 is not None and (
+                not isinstance(self.geoid_sha256, str) or len(self.geoid_sha256) != 64
+                or any(character not in "0123456789abcdef" for character in self.geoid_sha256)):
+            raise ValueError("geoid_sha256 must be 64 lowercase hexadecimal characters or null")
+        if self.height_mode == "gps_geoid_dsm" and self.geoid_sha256 is None:
+            raise ValueError("gps_geoid_dsm requires a pinned geoid_sha256")
         for key in ("size_threshold_bytes", "count_threshold", "metadata_timeout_seconds", "metadata_batch_size"):
             value = getattr(self, key)
             if type(value) is not int or value < 1:

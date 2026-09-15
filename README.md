@@ -1,6 +1,6 @@
 # UAV Photo Optimizer
 
-獨立於 UDAS 的本機航拍照片減量工具。Python 3.11+、ExifTool、pyproj、rasterio；不需要雲端服務。版本 0.4.0 提供命令列工具，沒有圖形介面。
+獨立於 UDAS 的本機航拍照片減量工具。Python 3.11+、ExifTool、pyproj、rasterio；不需要雲端服務。版本 0.5.0 提供命令列工具，沒有圖形介面。
 
 預設最低保留前向重疊率 **80%**，可調整。先將高重疊照片列為候選；若前後保留照片銜接不足，就保留安全橋接候選或回補該段。原始照片不修改、不移動、不刪除。預設只輸出報告，`--copy` 才複製保留照片。
 
@@ -36,6 +36,23 @@ python3 -m venv .venv
 
 ## DSM 平緩地形 70% 試驗
 
+建議使用 `config/xt701-dsm70-cross70-moderate-twvd2001.json` 的基準校正模式。照片 GPS 高是橢球高 `h`，先以 TWHyGEO2014 大地起伏 `N` 轉成 TWVD2001 正高 `H = h - N`，再計算 `AGL = H - H_DSM`。新模式必須同時提供 `--dsm` 與 `--geoid`；照片 metadata 必須明示高程為 `ellipsoidal`，且大地起伏網格的 SHA-256、目標基準、偏移方向、單位與點像元語意皆須相符。格網層級不符即停止；單張高程基準未確認、缺值、範圍外或校正後高度非正值則保留照片。
+
+QPS 公開的 TWHyGEO2014 pre-release ZIP 可用下列程式轉為帶來源標籤的本機 GeoTIFF；官方 TWHYGEO2014 原始模型需向國土測繪中心申請，不得把 QPS 重新發布檔誤稱為官方原檔。`data/` 已被 Git 忽略。
+
+```sh
+.venv/bin/python scripts/convert_twhygeo2014.py /path/to/TWHyGEO2014.zip data/geoid/TWHyGEO2014.tif
+./run ../UserUpload-original \
+  --config config/xt701-dsm70-cross70-moderate-twvd2001.json \
+  --dsm '../不分幅_全台20MDSM(2024)/DSMg_tawiwan_20m_20240627_g14.tif' \
+  --geoid data/geoid/TWHyGEO2014.tif \
+  --output outputs/my-twvd2001-run --force
+```
+
+20 m DSM 的官方資料集記載高程基準為 TWD97 (N,E,H)，本設定明示將其 `H` 宣告為臺灣本島的 TWVD2001 正高。原 GeoTIFF 本身沒有編碼垂直 CRS，因此 Summary 會同時記錄「設定宣告」與這項限制，不會冒充為檔案內生驗證。
+
+下列舊模式只留作比較與重現。
+
 `config/xt701-dsm70-trial.json` 保留原本較嚴格的 DSM 3×3 視窗坡度 ≤10°、高差 ≤10 m 政策。另提供 `config/xt701-dsm70-cross70-moderate-trial.json` 作為明示的中度試驗：坡度 ≤15°、高差 ≤20 m。兩者都使用前向與旁向 70%；粗糙地形、DSM 無資料、轉彎或非近垂直區段都保留。高度不同不再自動阻擋篩選，而是以每張照片各自的 GPS-minus-DSM 高度計算可變 footprint。
 
 ```sh
@@ -45,7 +62,7 @@ python3 -m venv .venv
   --output outputs/my-dsm70-trial --force
 ```
 
-試驗高度公式為 `GPSAltitude - DSM 中央像元高程`，**GPS 與 DSM 的垂直基準相容性尚未確認**。因此結果會標記 `EXPERIMENTAL_GPS_MINUS_DSM_UNCONFIRMED_VERTICAL_DATUM`，不能當作已驗證的 AGL 或直接刪除原始照片。GPS 絕對高程直接當 footprint 高度的 `config/xt701-gps-trial.json` 僅保留作為對照，不建議用於實際篩選。
+舊試驗高度公式為 `GPSAltitude - DSM 中央像元高程`，**GPS 與 DSM 的垂直基準相容性尚未確認**。因此結果會標記 `EXPERIMENTAL_GPS_MINUS_DSM_UNCONFIRMED_VERTICAL_DATUM`，不能當作已驗證的 AGL 或直接刪除原始照片。GPS 絕對高程直接當 footprint 高度的 `config/xt701-gps-trial.json` 僅保留作為對照，不建議用於實際篩選。
 
 旁向檢查會辨識同一 30 分鐘任務範圍內，不同、近似平行且相隔至少 5 m 的航帶片段；跨航帶照片必須在航向投影與旁向投影分別達到設定門檻。若保留點原本有合格伙伴、但該伙伴被前向減量略過，工具會回補其中最佳伙伴。來源資料本來就沒有達標伙伴或無法可靠配對時，工具會標記 `ORIGINAL_SIDE_GAP_OR_UNCERTAINTY` 或 `CROSS_STRIP_PAIR_UNCERTAIN`，但不會因此撤銷整條航帶已通過前向門檻的減量，也不會捏造 PASS。不同日期或相隔超過 30 分鐘的重飛不會互相提供覆蓋。
 
@@ -109,7 +126,8 @@ uav-photo-optimizer/
 ├── pyproject.toml
 ├── requirements.lock
 ├── config/default.json
-├── src/uav_photo_optimizer/  # config / metadata / geometry / terrain / selection / coverage / cli
+├── src/uav_photo_optimizer/  # config / metadata / geometry / geoid / terrain / selection / coverage / cli
+├── scripts/                  # 大地起伏模型可重現轉檔工具
 ├── tests/
 ├── docs/                   # 設計、驗證與版本紀錄
 ├── .Codex/plans/

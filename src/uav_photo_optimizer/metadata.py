@@ -53,6 +53,8 @@ class Photo:
     dsm_surface_height_m: float | None = None
     dsm_slope_deg: float | None = None
     dsm_relief_m: float | None = None
+    geoid_status: str = "NOT_REQUESTED"
+    geoid_undulation_m: float | None = None
     strip_id: int | None = None
     decision: str = "BYPASS_KEEP"
     reasons: list[str] = field(default_factory=list)
