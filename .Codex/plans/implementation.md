@@ -8,6 +8,7 @@
 - [x] Add a conservative DSM terrain gate and explicit XT701 angle/profile trial.
 - [x] Replace the unsafe GPS-altitude footprint trial with GPS-minus-DSM experimental geometry.
 - [x] Validate flat-terrain 70% behavior with synthetic tests and the 804-photo dataset.
+- [x] Add 70% cross-strip metadata geometry, partner restoration and uncertain-strip rollback.
 - [ ] Confirm GPS/DSM vertical-datum compatibility and perform original-vs-selected photogrammetry A/B validation.
 
 Initial minimum retained forward overlap: 0.80, configurable. Camera profiles and height evidence are explicit. No image decoding, deletion, upload or feature matching. Missing evidence retains original photos. Source photos and reports are not versioned.

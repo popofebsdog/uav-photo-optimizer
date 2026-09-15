@@ -51,6 +51,20 @@ class TrialTests(unittest.TestCase):
         self.assertTrue(all(p.agl_m is None for p in items))
         self.assertTrue(all(p.estimation_height_source == "GPS_MINUS_DSM_VERTICAL_DATUM_UNCONFIRMED" for p in items))
 
+    def test_gps_minus_dsm_height_change_uses_variable_footprints(self):
+        a, b = photo(0, 0, agl=None), photo(1, 5, agl=None)
+        for item, gps_height in ((a, 150), (b, 200)):
+            item.absolute_altitude = gps_height
+            item.dsm_surface_height_m = 100
+            item.dsm_status = "GENTLE"
+        cfg = config(height_mode="gps_minus_dsm_trial", require_dsm=True)
+
+        select([a, b], cfg, force=True)
+
+        self.assertEqual(a.strip_id, b.strip_id)
+        self.assertNotIn("GPS_HEIGHT_CHANGE_PROTECTION", a.reasons + b.reasons)
+        self.assertIsNotNone(overlap(a, b, cfg))
+
     def test_gps_minus_dsm_trial_requires_dsm(self):
         with self.assertRaises(ValueError):
             Config(height_mode="gps_minus_dsm_trial")

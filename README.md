@@ -1,6 +1,6 @@
 # UAV Photo Optimizer
 
-獨立於 UDAS 的本機航拍照片減量工具。Python 3.11+、ExifTool、pyproj、rasterio；不需要雲端服務。版本 0.2.0 提供命令列工具，沒有圖形介面。
+獨立於 UDAS 的本機航拍照片減量工具。Python 3.11+、ExifTool、pyproj、rasterio；不需要雲端服務。版本 0.3.0 提供命令列工具，沒有圖形介面。
 
 預設最低保留前向重疊率 **80%**，可調整。先將高重疊照片列為候選；若前後保留照片銜接不足，就保留安全橋接候選或回補該段。原始照片不修改、不移動、不刪除。預設只輸出報告，`--copy` 才複製保留照片。
 
@@ -36,16 +36,20 @@ python3 -m venv .venv
 
 ## DSM 平緩地形 70% 試驗
 
-`config/xt701-dsm70-trial.json` 是針對本批 XT701 照片的明示試驗設定：只有 DSM 3×3 視窗坡度 ≤10°、高差 ≤10 m，且相鄰估計離地高度變化 ≤2 m、五張視窗高度範圍 ≤5 m 的區段，才可進入 70% 前向重疊篩選。粗糙地形、DSM 無資料、轉彎、非近垂直或高度變化區段都保留。
+`config/xt701-dsm70-trial.json` 保留原本較嚴格的 DSM 3×3 視窗坡度 ≤10°、高差 ≤10 m 政策。另提供 `config/xt701-dsm70-cross70-moderate-trial.json` 作為明示的中度試驗：坡度 ≤15°、高差 ≤20 m。兩者都使用前向與旁向 70%；粗糙地形、DSM 無資料、轉彎或非近垂直區段都保留。高度不同不再自動阻擋篩選，而是以每張照片各自的 GPS-minus-DSM 高度計算可變 footprint。
 
 ```sh
 ./run ../UserUpload-original \
-  --config config/xt701-dsm70-trial.json \
+  --config config/xt701-dsm70-cross70-moderate-trial.json \
   --dsm '../不分幅_全台20MDSM(2024)/DSMg_tawiwan_20m_20240627_g14.tif' \
   --output outputs/my-dsm70-trial --force
 ```
 
 試驗高度公式為 `GPSAltitude - DSM 中央像元高程`，**GPS 與 DSM 的垂直基準相容性尚未確認**。因此結果會標記 `EXPERIMENTAL_GPS_MINUS_DSM_UNCONFIRMED_VERTICAL_DATUM`，不能當作已驗證的 AGL 或直接刪除原始照片。GPS 絕對高程直接當 footprint 高度的 `config/xt701-gps-trial.json` 僅保留作為對照，不建議用於實際篩選。
+
+旁向檢查會辨識同一 30 分鐘任務範圍內，不同、近似平行且相隔至少 5 m 的航帶片段；跨航帶照片必須在航向投影與旁向投影分別達到設定門檻。若唯一合格的伙伴原先被略過，工具會回補該照片；若某航帶存在無法可靠配對的保留點，該航帶的候選照片全部回補。來源資料本來就沒有達標伙伴時，只能保留並標記 `ORIGINAL_SIDE_GAP_OR_UNCERTAINTY`，不會捏造 PASS。不同日期或相隔超過 30 分鐘的重飛不會互相提供覆蓋。
+
+Summary 的整體 `side_overlap_status` 只要含粗糙地形等未評估保留照片，就會維持 `GAPS_OR_UNCERTAINTY`；實際被略過照片所屬航帶另由 `cross_strip_reduction_subset_status` 判定，必須為 `PASS` 才表示減量子集合的保留錨點都通過旁向檢查。
 
 ## 提供相機與逐張高度資料後減量
 
@@ -89,7 +93,7 @@ flight-a/photo001.jpg,100,survey-derived AGL with compatible vertical datum,-90,
 - 航帶以時間、相機、GPS 軌跡、角度與高度變化切分；不會跨不可信區段刪照片。未知拍攝時間會保留整個相機資料流。不同設備沒有序號且共用同型號／時間時，應分開執行。
 - 若下一個錨點無法安全銜接，會保留最後一個可安全橋接的候選；仍無法滿足時保留候選。這是線性時間的保守策略，不是追求最少照片的全域最佳化。
 - DSM 判斷只使用照片 GPS 點周圍 3×3 像元，不能代表整張 footprint 或航帶間的完整地形／遮蔽狀況。
-- **本版未實作跨航帶旁向重疊／全區域覆蓋檢核**，報告明示 NOT_IMPLEMENTED／NOT_EVALUATED。沿同航帶的橫向偏移檢查不能代替旁向覆蓋檢查。
+- 已實作 Metadata 幾何式跨航帶旁向重疊與回補；仍未實作影像特徵匹配、地形遮蔽或全區域像素級覆蓋檢核。報告中的 PASS 不是建模品質保證。
 - 未執行 Metashape 建模，也不保證影像內容匹配或模型品質。正式使用前須對代表性資料做原始與減量集合 A/B 建模比較。
 - TIFF/DNG 由 ExifTool 擷取 Metadata；不解碼照片像素。掃描採批次執行，單批讀取失敗保留該批，輸出原因。
 - 此為獨立 CLI 第一版，未接 Upload／Job／DB，亦非原 UDAS 全規格完成版。設定錯誤在輸出前報錯，來源完整保留；沒有現存 upload 可自動 fallback。
@@ -105,7 +109,7 @@ uav-photo-optimizer/
 ├── pyproject.toml
 ├── requirements.lock
 ├── config/default.json
-├── src/uav_photo_optimizer/  # config / metadata / selection / cli
+├── src/uav_photo_optimizer/  # config / metadata / geometry / terrain / selection / coverage / cli
 ├── tests/
 ├── docs/                   # 設計、驗證與版本紀錄
 ├── .Codex/plans/

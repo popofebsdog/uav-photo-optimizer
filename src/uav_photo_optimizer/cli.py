@@ -123,7 +123,7 @@ def run(args):
         },
         "reason_counts": dict(Counter(r for p in photos for r in set(p.reasons))),
         "retained_link_counts": dict(Counter(p.retained_link_status for p in photos if p.decision != "SKIP")),
-        "side_overlap_status": "NOT_IMPLEMENTED", "coverage_status": "NOT_EVALUATED",
+        "coverage_status": "METADATA_GEOMETRY_ONLY" if config.cross_strip_enabled else "NOT_EVALUATED",
         "modeling_validation_status": "NOT_RUN", "copy_requested": args.copy,
         "analysis_duration_seconds": round(time.monotonic() - started, 3),
     }

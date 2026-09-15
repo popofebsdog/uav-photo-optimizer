@@ -8,7 +8,7 @@ Covered: exact OR thresholds, 80% dense-strip selection, 60% override, A/B/C res
 
 Version 0.2.0 additionally covers projected DSM validation and masking, Horn slope/relief, rough/missing terrain protection, explicit GPS-minus-DSM estimates, GPS-height-change protection, 70% selection, sideways flight, hover noise and last-safe-candidate restoration.
 
-Result: 33 tests passed, including ExifTool timeout and vendor-field normalization tests.
+Current release result: 44 tests passed, including repeated-mission isolation, global false-PASS prevention, conservative spatial pruning, cross-strip restoration, ExifTool timeout and vendor-field normalization tests.
 
 Synthetic geometry tests are deterministic; they do not establish real photogrammetric quality.
 
@@ -46,3 +46,26 @@ Command used `config/xt701-dsm70-trial.json`, the supplied 20 m Taiwan DSM, `--f
 The estimated geometry heights of those candidates range from 66.35 m to 150.91 m, using `GPSAltitude - DSM center elevation`. The source XMP identifies its vertical reference as ellipsoidal, but the supplied DSM contains no confirmed vertical CRS. The report therefore classifies this run as `EXPERIMENTAL_GPS_MINUS_DSM_UNCONFIRMED_VERTICAL_DATUM`. These seven decisions are candidates for inspection/A-B modeling, not authorization to delete originals.
 
 An earlier GPS-altitude-proxy run marked 11 photos skippable, but it used absolute GPS elevation directly as footprint height and overstated the usable footprint. It is retained only as a comparison artifact and is not the accepted trial result.
+
+## Forward + cross-strip 70% trial — 2026-09-11
+
+Version 0.3.0 used `GPSAltitude - DSM center elevation` per photo, the explicit moderate 15°/20 m DSM terrain policy, 70% minimum forward overlap, 70% minimum side overlap and a 30-minute cross-strip task window. Report-only output is under `outputs/dsm70-cross70-moderate-008/`.
+
+- 804 input photos; 720 selected and 84 marked `SKIP`.
+- 1,994,259,706 bytes marked skippable: 10.448% of photos and 8.849% of storage.
+- Terrain classification: 281 `GENTLE`, 521 `ROUGH`, 2 `OUTSIDE_OR_EDGE`.
+- 24 eligible strip fragments; 121 initial excessive-forward-overlap candidates.
+- Cross-strip protection restored 37 candidates: 1 direct partner and 36 because a related strip contained an unpairable retained point.
+- 64 unique retained cross-strip links were evaluated; 75 retained points recorded a side-overlap PASS.
+- No original below-threshold side partner was detected. Twenty-three retained points remained `UNPAIRED_OR_UNCERTAIN`; their related candidate photos were restored rather than treated as safe removals.
+- Another 622 retained photos were outside the geometry-eligible cross-strip subset, so the global side status correctly remains `GAPS_OR_UNCERTAINTY`; it is not presented as full-dataset PASS.
+- All 74 evaluated retained forward links passed 70%; zero forward FAIL links remained.
+- All 84 remaining `SKIP` candidates belong to nine strips whose 28 retained anchors have side-overlap PASS. Within those strips, the minimum recorded side overlap is 76.234% and minimum retained forward overlap is 70.029%.
+- `cross_strip_reduction_subset_status` is `PASS`; the global and reduction-subset states are deliberately separate.
+- Analysis took 7.087 seconds on this machine. Copy was not requested and source photos were unchanged.
+
+The original 10°/10 m terrain policy was also rerun without changing its safety thresholds: 796 selected, 8 marked `SKIP`, 164,233,624 bytes marked skippable, 13 cross-strip restorations, and a `PASS` reduction subset of four retained anchors. Its report is under `outputs/dsm70-cross70-conservative-008/`. The 15°/20 m result is therefore a separate moderate policy trial, not a silent relaxation of the original config.
+
+A 1,000-photo synthetic benchmark with 20 parallel strips measured 1.299 seconds before strip/time/spatial pruning and 0.417 seconds after on this machine. This is a local measurement, not a portable performance guarantee.
+
+This is metadata geometry validation, not footprint-wide terrain projection, image matching, or Metashape A/B modeling. The unconfirmed GPS/DSM vertical-datum compatibility remains the principal modeling limitation.

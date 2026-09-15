@@ -69,7 +69,7 @@ def apply_dsm(photos, path: Path, config):
             "usage": "LOCAL_TERRAIN_GATE_AND_EXPERIMENTAL_GPS_MINUS_DSM_HEIGHT" if uses_height_difference else "LOCAL_TERRAIN_GATE_ONLY",
             "height_formula": "GPSAltitude - DSM_center_elevation" if uses_height_difference else None,
             "window_cells": [3, 3],
-            "limitation": "Local neighborhood classification, not full image-footprint or cross-strip coverage validation",
+            "limitation": "Local neighborhood classification, not full footprint terrain projection or occlusion validation",
         }
     after = path.stat()
     if (before.st_size, before.st_mtime_ns) != (after.st_size, after.st_mtime_ns):

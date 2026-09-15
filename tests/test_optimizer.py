@@ -186,6 +186,8 @@ class IOTests(unittest.TestCase):
             self.assertEqual(result, 0)
             summary = json.loads((output / "summary.json").read_text())
             self.assertEqual(summary["selected_photo_count"], 1)
+            self.assertEqual(summary["side_overlap_status"], "NOT_EVALUATED")
+            self.assertIn("cross_strip_evaluated_link_count", summary)
             self.assertEqual((output / "selected/one.jpg").read_bytes(), b"test bytes")
             self.assertEqual(main([str(root), "--output", str(output)]), 2)
             self.assertEqual(main([str(root), "--output", str(root / "nested")]), 2)

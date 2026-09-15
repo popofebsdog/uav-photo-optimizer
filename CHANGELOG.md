@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.3.0 — 2026-09-11
+
+- Added 70% cross-strip metadata overlap measurement for distinct parallel flight lines.
+- Restores skipped side partners and every candidate on strips with unpairable retained points.
+- Uses per-photo GPS-minus-DSM variable footprints instead of automatically bypassing height changes.
+- Reports side partners, overlap values, original gaps, uncertain pairings and cross-strip restorations per photo and in the summary.
+- Prevents cross-mission pairing with a configurable 30-minute window and prevents global PASS when retained photos remain unevaluated.
+- Prunes photo comparisons by strip time, heading, camera and expanded spatial envelope; shared geometry no longer has a circular import.
+- Keeps the original 10°/10 m policy intact and supplies 15°/20 m as a separately named moderate trial configuration.
+- Recorded a report-only 804-photo forward-and-side trial; image matching and model-quality validation remain out of scope.
+
 ## 0.2.0 — 2026-09-11
 
 - Added projected-DSM local slope/relief protection with provenance and SHA-256 reporting.

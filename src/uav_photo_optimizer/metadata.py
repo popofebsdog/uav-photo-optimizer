@@ -63,6 +63,11 @@ class Photo:
     previous_retained_id: str | None = None
     retained_overlap: float | None = None
     retained_link_status: str = "NOT_EVALUATED"
+    cross_strip_status: str = "NOT_EVALUATED"
+    cross_strip_partner_id: str | None = None
+    side_overlap: float | None = None
+    cross_strip_along_overlap: float | None = None
+    cross_strip_restored: bool = False
 
 
 def number(value):

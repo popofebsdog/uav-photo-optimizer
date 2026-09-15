@@ -2,32 +2,10 @@
 
 import math
 
-from pyproj import Geod
-
+from .coverage import protect_cross_strip
 from .config import Config
+from .geometry import EPS, GEOD, angle, distance, footprint, geometry_height
 from .metadata import Photo
-
-GEOD = Geod(ellps="WGS84")
-EPS = 1e-9
-
-
-def angle(a, b):
-    return abs((a - b + 180) % 360 - 180)
-
-
-def distance(a, b):
-    bearing, _, meters = GEOD.inv(a.longitude, a.latitude, b.longitude, b.latitude)
-    return bearing % 360, meters
-
-
-def geometry_height(p, config):
-    if config.height_mode == "gps_proxy_trial":
-        return p.absolute_altitude
-    if config.height_mode == "gps_minus_dsm_trial":
-        if p.absolute_altitude is None or p.dsm_surface_height_m is None:
-            return None
-        return p.absolute_altitude - p.dsm_surface_height_m
-    return p.agl_m
 
 
 def prepare(photos, config):
@@ -88,7 +66,7 @@ def eligibility(p: Photo, config: Config) -> str | None:
     height = geometry_height(p, config)
     if height is None or height <= 0:
         return "HEIGHT_REFERENCE_UNCERTAIN"
-    if config.height_mode in ("gps_proxy_trial", "gps_minus_dsm_trial") and p.gps_height_stable is not True:
+    if config.height_mode == "gps_proxy_trial" and p.gps_height_stable is not True:
         return "GPS_HEIGHT_CHANGE_PROTECTION"
     profile = config.camera_profiles.get(p.model)
     if not profile or (p.width, p.height) != (profile["image_width"], profile["image_height"]):
@@ -102,13 +80,6 @@ def eligibility(p: Photo, config: Config) -> str | None:
     return None
 
 
-def footprint(p: Photo, config: Config):
-    profile = config.camera_profiles[p.model]
-    height = geometry_height(p, config)
-    return (height * profile["sensor_height_mm"] / p.focal_mm,
-            height * profile["sensor_width_mm"] / p.focal_mm)
-
-
 def overlap(a: Photo, b: Photo, config: Config) -> float | None:
     """Conservative interval overlap normalized by larger length, not area coverage.
 
@@ -118,9 +89,9 @@ def overlap(a: Photo, b: Photo, config: Config) -> float | None:
     if eligibility(a, config) or eligibility(b, config) or (a.model, a.serial, a.focal_mm) != (b.model, b.serial, b.focal_mm):
         return None
     ha, hb = geometry_height(a, config), geometry_height(b, config)
-    if abs(ha - hb) / min(ha, hb) > config.max_height_change_ratio:
+    if config.height_mode != "gps_minus_dsm_trial" and abs(ha - hb) / min(ha, hb) > config.max_height_change_ratio:
         return None
-    if config.height_mode in ("gps_proxy_trial", "gps_minus_dsm_trial") and abs(ha - hb) > config.gps_max_step_m:
+    if config.height_mode == "gps_proxy_trial" and abs(ha - hb) > config.gps_max_step_m:
         return None
     if angle(a.yaw, b.yaw) > config.max_heading_change_deg:
         return None
@@ -257,6 +228,15 @@ def reduce_strip(strip: list[Photo], config: Config):
         anchor = p
     if len(strip) == 1:
         anchor.reasons.append("LAST_PHOTO")
+
+    evaluate_retained_links(strip, config)
+
+
+def evaluate_retained_links(strip: list[Photo], config: Config):
+    for p in strip:
+        p.previous_retained_id = None
+        p.retained_overlap = None
+        p.retained_link_status = "NOT_EVALUATED"
     previous = None
     for p in strip:
         if p.decision == "SKIP":
@@ -266,7 +246,8 @@ def reduce_strip(strip: list[Photo], config: Config):
             p.retained_overlap = overlap(previous, p, config)
             p.retained_link_status = "UNKNOWN" if p.retained_overlap is None else "PASS" if p.retained_overlap + EPS >= config.min_retained_forward_overlap else "FAIL"
             if p.retained_link_status != "PASS":
-                p.reasons.append("ORIGINAL_LINK_GAP_OR_UNCERTAINTY")
+                if "ORIGINAL_LINK_GAP_OR_UNCERTAINTY" not in p.reasons:
+                    p.reasons.append("ORIGINAL_LINK_GAP_OR_UNCERTAINTY")
         previous = p
 
 
@@ -278,8 +259,13 @@ def select(photos: list[Photo], config: Config, force=False):
     if not triggered:
         for p in photos:
             p.reasons.append("OPTIMIZER_DISABLED" if not config.enabled else "BELOW_TRIGGER_THRESHOLD")
-        return {"trigger_by_size": trigger_size, "trigger_by_count": trigger_count, "forced": force, "optimization_triggered": False, "strip_count": 0}
+        coverage = protect_cross_strip([], config, photos)
+        return {"trigger_by_size": trigger_size, "trigger_by_count": trigger_count, "forced": force, "optimization_triggered": False, "strip_count": 0, **coverage}
     strips = segment(photos, config)
     for strip in strips:
         reduce_strip(strip, config)
-    return {"trigger_by_size": trigger_size, "trigger_by_count": trigger_count, "forced": force, "optimization_triggered": True, "strip_count": len(strips)}
+    coverage = protect_cross_strip(strips, config, photos)
+    if coverage["cross_strip_restored_photo_count"]:
+        for strip in strips:
+            evaluate_retained_links(strip, config)
+    return {"trigger_by_size": trigger_size, "trigger_by_count": trigger_count, "forced": force, "optimization_triggered": True, "strip_count": len(strips), **coverage}
