@@ -161,24 +161,9 @@ def protect_cross_strip(strips, config, all_photos=None):
                     partners[a.photo_id].append((b, pair))
                     partners[b.photo_id].append((a, pair))
 
+    # Original side gaps stay explicit. Restore only when forward reduction
+    # removed every otherwise-valid partner of a retained photo.
     restored = set()
-    unsafe_strips = set()
-    for photo in photos:
-        if photo.decision == "SKIP":
-            continue
-        source_valid = [item for item in partners[photo.photo_id]
-                        if item[1].side_overlap + 1e-9 >= config.min_retained_side_overlap]
-        if not source_valid:
-            unsafe_strips.add(photo.strip_id)
-    for photo in photos:
-        if photo.decision != "SKIP" or photo.strip_id not in unsafe_strips:
-            continue
-        photo.decision = "KEEP"
-        photo.restored = True
-        photo.cross_strip_restored = True
-        photo.reasons.append("CROSS_STRIP_UNCERTAINTY_PROTECTION")
-        restored.add(photo.photo_id)
-
     changed = True
     while changed:
         changed = False

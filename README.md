@@ -1,6 +1,6 @@
 # UAV Photo Optimizer
 
-獨立於 UDAS 的本機航拍照片減量工具。Python 3.11+、ExifTool、pyproj、rasterio；不需要雲端服務。版本 0.3.0 提供命令列工具，沒有圖形介面。
+獨立於 UDAS 的本機航拍照片減量工具。Python 3.11+、ExifTool、pyproj、rasterio；不需要雲端服務。版本 0.4.0 提供命令列工具，沒有圖形介面。
 
 預設最低保留前向重疊率 **80%**，可調整。先將高重疊照片列為候選；若前後保留照片銜接不足，就保留安全橋接候選或回補該段。原始照片不修改、不移動、不刪除。預設只輸出報告，`--copy` 才複製保留照片。
 
@@ -47,9 +47,9 @@ python3 -m venv .venv
 
 試驗高度公式為 `GPSAltitude - DSM 中央像元高程`，**GPS 與 DSM 的垂直基準相容性尚未確認**。因此結果會標記 `EXPERIMENTAL_GPS_MINUS_DSM_UNCONFIRMED_VERTICAL_DATUM`，不能當作已驗證的 AGL 或直接刪除原始照片。GPS 絕對高程直接當 footprint 高度的 `config/xt701-gps-trial.json` 僅保留作為對照，不建議用於實際篩選。
 
-旁向檢查會辨識同一 30 分鐘任務範圍內，不同、近似平行且相隔至少 5 m 的航帶片段；跨航帶照片必須在航向投影與旁向投影分別達到設定門檻。若唯一合格的伙伴原先被略過，工具會回補該照片；若某航帶存在無法可靠配對的保留點，該航帶的候選照片全部回補。來源資料本來就沒有達標伙伴時，只能保留並標記 `ORIGINAL_SIDE_GAP_OR_UNCERTAINTY`，不會捏造 PASS。不同日期或相隔超過 30 分鐘的重飛不會互相提供覆蓋。
+旁向檢查會辨識同一 30 分鐘任務範圍內，不同、近似平行且相隔至少 5 m 的航帶片段；跨航帶照片必須在航向投影與旁向投影分別達到設定門檻。若保留點原本有合格伙伴、但該伙伴被前向減量略過，工具會回補其中最佳伙伴。來源資料本來就沒有達標伙伴或無法可靠配對時，工具會標記 `ORIGINAL_SIDE_GAP_OR_UNCERTAINTY` 或 `CROSS_STRIP_PAIR_UNCERTAIN`，但不會因此撤銷整條航帶已通過前向門檻的減量，也不會捏造 PASS。不同日期或相隔超過 30 分鐘的重飛不會互相提供覆蓋。
 
-Summary 的整體 `side_overlap_status` 只要含粗糙地形等未評估保留照片，就會維持 `GAPS_OR_UNCERTAINTY`；實際被略過照片所屬航帶另由 `cross_strip_reduction_subset_status` 判定，必須為 `PASS` 才表示減量子集合的保留錨點都通過旁向檢查。
+Summary 的整體 `side_overlap_status` 只要含粗糙地形等未評估保留照片，就會維持 `GAPS_OR_UNCERTAINTY`；實際被略過照片所屬航帶另由 `cross_strip_reduction_subset_status` 判定。只有 `PASS` 才表示減量子集合的保留錨點都通過旁向檢查；`GAPS_OR_UNCERTAINTY` 表示安全的前向減量仍存在，但旁向品質尚未由 metadata 幾何完整證實，應以實際建模驗證。
 
 ## 提供相機與逐張高度資料後減量
 

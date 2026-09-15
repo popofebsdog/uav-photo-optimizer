@@ -75,7 +75,9 @@ class CrossStripProtectionTests(unittest.TestCase):
         result = protect_cross_strip([left, right], cfg)
 
         self.assertNotEqual(result["side_overlap_status"], "PASS")
-        self.assertEqual(right[1].decision, "KEEP")
+        self.assertEqual(right[1].decision, "SKIP")
+        self.assertFalse(right[1].cross_strip_restored)
+        self.assertEqual(result["cross_strip_reduction_subset_status"], "GAPS_OR_UNCERTAINTY")
         self.assertFalse(any(p.cross_strip_status == "PASS" for p in left + right))
 
     def test_bypass_retained_photo_prevents_global_pass(self):
@@ -129,17 +131,17 @@ class CrossStripProtectionTests(unittest.TestCase):
         self.assertTrue(any(p.cross_strip_status == "ORIGINAL_GAP_OR_UNCERTAIN" for p in left))
         self.assertTrue(all(p.decision == "KEEP" for p in left + right))
 
-    def test_unpaired_strip_restores_all_of_its_candidates(self):
+    def test_unpaired_strip_keeps_safe_forward_reduction(self):
         isolated = make_strip(1, 0)
         isolated[1].decision = "SKIP"
         cfg = config(cross_strip_enabled=True, min_retained_side_overlap=0.7)
 
         result = protect_cross_strip([isolated], cfg)
 
-        self.assertEqual(isolated[1].decision, "KEEP")
-        self.assertTrue(isolated[1].cross_strip_restored)
-        self.assertIn("CROSS_STRIP_UNCERTAINTY_PROTECTION", isolated[1].reasons)
-        self.assertEqual(result["cross_strip_restored_photo_count"], 1)
+        self.assertEqual(isolated[1].decision, "SKIP")
+        self.assertFalse(isolated[1].cross_strip_restored)
+        self.assertEqual(result["cross_strip_restored_photo_count"], 0)
+        self.assertEqual(result["cross_strip_reduction_subset_status"], "GAPS_OR_UNCERTAINTY")
 
 
 if __name__ == "__main__":

@@ -69,3 +69,19 @@ The original 10°/10 m terrain policy was also rerun without changing its safety
 A 1,000-photo synthetic benchmark with 20 parallel strips measured 1.299 seconds before strip/time/spatial pruning and 0.417 seconds after on this machine. This is a local measurement, not a portable performance guarantee.
 
 This is metadata geometry validation, not footprint-wide terrain projection, image matching, or Metashape A/B modeling. The unconfirmed GPS/DSM vertical-datum compatibility remains the principal modeling limitation.
+
+## Adaptive uncertainty handling — 2026-09-15
+
+Version 0.4.0 reran the same 804-photo moderate 15°/20 m, forward 70%, side 70% configuration. The only selection change was to stop restoring every forward-overlap candidate on a strip merely because the source data had no verifiable side partner. A skipped photo is still restored when it was an originally valid side partner and its removal would break that retained metadata link. Report-only output is under `outputs/dsm70-cross70-moderate-009/`.
+
+- 804 input photos; 684 selected and 120 marked `SKIP`.
+- 2,853,881,153 bytes marked skippable: 14.925% of photos and 12.664% of storage, up from 10.448% and 8.849% respectively.
+- Cross-strip restoration fell from 37 to 1: the one deletion-induced partner loss was still repaired; the other 36 were original pairing uncertainty and no longer cancelled safe forward reduction.
+- All 38 evaluated retained forward links passed; minimum recorded forward overlap was 70.029%.
+- Forty-five retained points had a cross-strip `PASS`; minimum recorded side overlap among them was 70.130%.
+- Global and reduction-subset side states remain `GAPS_OR_UNCERTAINTY`, not `PASS`, because original/bypassed coverage remains unverified.
+- The geometry-eligible subset contained 182 photos; the adaptive selector retained 62 and skipped 120 (65.934% reduction). Simple alternating selection within each eligible strip would retain 98 and skip 84, so the adaptive spacing is already more aggressive than odd/even selection where geometry is trustworthy.
+- Alternating the complete capture-time sequence would retain 402 of 804 photos. That 50% count is recorded only as the user-provided modeling comparison baseline; it crosses 622 protected rough-terrain, DSM-unavailable or nadir-uncertain photos and is not certified by this metadata-only run.
+- Manifest counts, byte totals and `selected-files.json` were independently cross-checked against the summary. Copy was not requested and source photos were unchanged.
+
+The remaining gap between 684 selected photos and the 402-photo empirical baseline is therefore dominated by evidence eligibility, not by the adaptive forward-spacing rule. Relaxing that boundary would require an explicit dataset-specific validated override or image/model-quality evidence; it must not become a default for other missions.

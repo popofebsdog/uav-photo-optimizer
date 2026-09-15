@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.4.0 — 2026-09-15
+
+- Keeps adaptive forward-overlap reduction on unpaired or originally uncertain strips instead of restoring every candidate on the strip.
+- Still restores a skipped photo when deletion would remove an originally valid cross-strip partner.
+- Continues to report original side gaps and uncertainty without fabricating a coverage PASS.
+- Keeps the 70% trial thresholds and all DSM, turn, nadir and geometry eligibility protections unchanged.
+
 ## 0.3.0 — 2026-09-11
 
 - Added 70% cross-strip metadata overlap measurement for distinct parallel flight lines.
