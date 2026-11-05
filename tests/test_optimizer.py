@@ -1,4 +1,5 @@
 import json
+import math
 import tempfile
 import unittest
 import subprocess
@@ -83,6 +84,29 @@ class SelectionTests(unittest.TestCase):
         p = photo(1, 5)
         p.pitch = -45
         self.assertIsNone(overlap(photo(0), p, config()))
+
+    def test_tilted_photos_are_retained_without_full_pose_projection(self):
+        items = [photo(i, i * 5) for i in range(9)]
+        for p in items:
+            p.pitch = -80
+        select(items, config(max_nadir_deviation_deg=10), force=True)
+        self.assertTrue(all(p.decision == "BYPASS_KEEP" for p in items))
+
+    def test_yaw_difference_uses_conservative_common_frame(self):
+        a, b = photo(0), photo(1, 30)
+        a.yaw, b.yaw = -5, 5
+        value = overlap(a, b, config())
+        self.assertIsNotNone(value)
+        # A 100 x 133.333 m footprint rotated 5 degrees contains this
+        # centered, common-axis rectangle; normalize by the original length.
+        core_length = 100 / (math.cos(math.radians(5)) + 4/3 * math.sin(math.radians(5)))
+        self.assertLessEqual(value, (core_length - 30) / 100 + 1e-8)
+
+    def test_hover_with_yaw_difference_also_uses_inner_footprint(self):
+        a, b = photo(0), photo(1, 0.1)
+        a.yaw, b.yaw = -5, 5
+        core_length = 100 / (math.cos(math.radians(5)) + 4/3 * math.sin(math.radians(5)))
+        self.assertLessEqual(overlap(a, b, config()), (core_length - 0.1) / 100 + 1e-8)
 
     def test_original_gap_stays_and_is_reported(self):
         items = [photo(0), photo(1, 40)]

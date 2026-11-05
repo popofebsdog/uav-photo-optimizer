@@ -1,6 +1,6 @@
 # UAV Photo Optimizer
 
-獨立於 UDAS 的本機航拍照片減量工具。Python 3.11+、ExifTool、pyproj、rasterio；不需要雲端服務。版本 0.5.0 提供命令列工具，沒有圖形介面。
+獨立於 UDAS 的本機航拍照片減量工具。Python 3.11+、ExifTool、pyproj、rasterio；不需要雲端服務。版本 0.6.0 提供命令列工具，沒有圖形介面。
 
 > 成果檢核人員請先閱讀：[方法學與成果檢核說明書](docs/methodology-review-manual-zh-TW.md)
 
@@ -60,6 +60,39 @@ QPS 公開的 TWHyGEO2014 pre-release ZIP 可用下列程式轉為帶來源標�
 
 20 m DSM 的官方資料集記載高程基準為 TWD97 (N,E,H)，本設定明示將其 `H` 宣告為臺灣本島的 TWVD2001 正高。原 GeoTIFF 本身沒有編碼垂直 CRS，因此 Summary 會同時記錄「設定宣告」與這項限制，不會冒充為檔案內生驗證。
 
+60% 比較組使用 `config/xt701-dsm60-cross60-moderate-twvd2001.json`；前向候選門檻、最低保留前向與最低旁向皆為 `0.6`，其餘 DSM／高程政策與 70% 組相同。將上述命令的設定與輸出目錄改成此組即可重現。
+
+0.5.1 修正姿態與回補幾何：目前僅對 metadata pitch 為 `-90°` 的照片進行減量，傾斜照片標記 `TILTED_FOOTPRINT_UNSUPPORTED` 並保留；`max_nadir_deviation_deg` 容差不會啟用尚未支援的完整姿態投影。不同 yaw 先轉成共同方向的保守內接矩形，重疊率仍以原本較大尺寸為分母。旁向回補採固定順序與穩定的伙伴選擇，並交替修復前向連結，直到不再需要回補。
+
+### 分級地形 50% 試驗（0.6.0）
+
+`terrain_policy` 預設為 `strict`，舊設定仍在地形超過軟門檻時全部保留。明示使用 `config/xt701-dsm50-cross50-graded-twvd2001.json` 才啟用分級政策：
+
+| DSM 分級 | 這組試驗的條件 | 篩選行為 |
+|---|---|---|
+| `GENTLE` | 坡度 ≤15° 且高差 ≤20 m | 通過地形條件，繼續其他檢查 |
+| `WARNING` | 不符合 GENTLE，但坡度 ≤30° 且高差 ≤40 m | 記錄 `TERRAIN_WARNING`，允許繼續其他檢查 |
+| `ROUGH` | 坡度 >30° 或高差 >40 m | 繼續硬性保留 |
+| 無資料／邊界 | DSM 或高程證據無效 | 繼續保留 |
+
+`terrain_max_slope_deg`／`terrain_max_relief_m` 是軟門檻；`terrain_hard_max_slope_deg`／`terrain_hard_max_relief_m` 是分級政策的硬上限，不能小於軟門檻。前向候選、最低前向與最低旁向皆維持 50%；姿態、高程基準與銜接保護不變。
+
+```sh
+./run ../UserUpload-original \
+  --config config/xt701-dsm50-cross50-graded-twvd2001.json \
+  --dsm '../不分幅_全台20MDSM(2024)/DSMg_tawiwan_20m_20240627_g14.tif' \
+  --geoid data/geoid/TWHyGEO2014.tif \
+  --output outputs/my-graded50-run --force
+```
+
+同組 804 張重掃：原 strict 50% 保留 690 張；graded 50% 保留 557 張、247 張 `SKIP`，張數減量 30.721%、候選容量 5.851 GB。322 張 WARNING 中，197 張保留、125 張略過。Summary 的 `terrain_warning_*` 另行統計，沒有將 WARNING 改寫為 GENTLE。這是明示放寬的 metadata 試驗；尚未實作坡面投影、遮蔽或建模品質驗證。
+
+### 實際建模測試的結論
+
+已用 Metashape Professional 2.2.0 對這份 557 張清單執行一次 Low 解析度重建：483 張對齊（86.7%），產生 201,725 三角面的模型，且重新載入專案與匯出計數核對通過。但仍有 74 張未對齊，兩個共用特徵點群組來自不同日期、GPS 中心相距約 20.1 公里的拍攝區；模型未建立正式照片貼圖，並可見粗糙及大片平滑表面。
+
+**這是部分建模可行性測試，不是品質驗證通過，也不是減量不影響品質的證據。** 尚未與完整 804 張或奇／偶 402 張方案做同參數 A/B。完整設定、數據與限制見[驗證紀錄](docs/validation.md#metashape-feasibility-test--2026-10-12)。原始照片、含 GPS 的執行報告及大型建模輸出不隨程式碼發布。
+
 下列舊模式只留作比較與重現。
 
 `config/xt701-dsm70-trial.json` 保留原本較嚴格的 DSM 3×3 視窗坡度 ≤10°、高差 ≤10 m 政策。另提供 `config/xt701-dsm70-cross70-moderate-trial.json` 作為明示的中度試驗：坡度 ≤15°、高差 ≤20 m。兩者都使用前向與旁向 70%；粗糙地形、DSM 無資料、轉彎或非近垂直區段都保留。高度不同不再自動阻擋篩選，而是以每張照片各自的 GPS-minus-DSM 高度計算可變 footprint。
@@ -98,7 +131,7 @@ flight-a/photo001.jpg,100,survey-derived AGL with compatible vertical datum,-90,
   --min-overlap 0.8 --output outputs/selected-80 --copy
 ```
 
-`--min-overlap 0.6` 可測試 60% 的最低要求；這是比例值，不接受數字 `60` 或 `80`。候選門檻 `overlap_threshold` 預設維持 0.8，與最低保留要求分別記錄。
+`--min-overlap 0.6` 只修改最低保留前向要求；這是比例值，不接受數字 `60` 或 `80`。它不修改 `overlap_threshold` 或旁向門檻；完整 60% 組請使用上述 60% 設定。候選門檻預設維持 0.8，與最低保留要求分別記錄。
 
 ## 輸出
 
@@ -115,12 +148,12 @@ flight-a/photo001.jpg,100,survey-derived AGL with compatible vertical datum,-90,
 
 ## 幾何與版本限制
 
-- 只支援近垂直、局部近似平坦且移動方向接近相機影像兩個主軸之一的情況；其他保守保留。不同 Footprint 長度以區間交集除以較大長度作估算。
+- 只支援 metadata 為垂直拍攝、局部近似平坦且移動方向接近相機影像兩個主軸之一的情況；其他保守保留。yaw 差異使用共同方向內接矩形，區間交集除以原本較大長度作估算；未處理 roll、畸變或完整姿態投影。
 - 航帶以時間、相機、GPS 軌跡、角度與高度變化切分；不會跨不可信區段刪照片。未知拍攝時間會保留整個相機資料流。不同設備沒有序號且共用同型號／時間時，應分開執行。
-- 若下一個錨點無法安全銜接，會保留最後一個可安全橋接的候選；仍無法滿足時保留候選。這是線性時間的保守策略，不是追求最少照片的全域最佳化。
+- 若下一個錨點無法安全銜接，會保留最後一個可安全橋接的候選；仍無法滿足時保留候選。前向初篩是線性時間的保守策略；後續前向／旁向交替回補不是追求最少照片的全域最佳化。失敗連結僅在原始序列也相鄰時標記 `ORIGINAL_LINK_GAP_OR_UNCERTAINTY`；跨越候選的失敗連結先回補中間照片，不會冒充原始缺口。
 - DSM 判斷只使用照片 GPS 點周圍 3×3 像元，不能代表整張 footprint 或航帶間的完整地形／遮蔽狀況。
 - 已實作 Metadata 幾何式跨航帶旁向重疊與回補；仍未實作影像特徵匹配、地形遮蔽或全區域像素級覆蓋檢核。報告中的 PASS 不是建模品質保證。
-- 未執行 Metashape 建模，也不保證影像內容匹配或模型品質。正式使用前須對代表性資料做原始與減量集合 A/B 建模比較。
+- 僅執行過上述部分、低解析度的 Metashape 可行性測試；不保證影像內容匹配或模型品質。正式使用前須對代表性資料做原始與減量集合 A/B 建模比較。
 - TIFF/DNG 由 ExifTool 擷取 Metadata；不解碼照片像素。掃描採批次執行，單批讀取失敗保留該批，輸出原因。
 - 此為獨立 CLI 第一版，未接 Upload／Job／DB，亦非原 UDAS 全規格完成版。設定錯誤在輸出前報錯，來源完整保留；沒有現存 upload 可自動 fallback。
 

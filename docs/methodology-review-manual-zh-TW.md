@@ -1,7 +1,7 @@
 # UAV Photo Optimizer 方法學與成果檢核說明書
 
-> 版本：0.5.0<br>
-> 更新日期：2026-09-15<br>
+> 版本：0.6.0<br>
+> 更新日期：2026-11-06<br>
 > 適用對象：航拍成果檢核人員、測繪專案管理人員、品質審查人員<br>
 > 工具定位：依 metadata 與局部 DSM 幾何進行「候選照片減量」，不是建模成果驗收軟體
 
@@ -45,10 +45,12 @@ flowchart LR
 | 單張照片 | metadata 與局部地形證據是否足夠 | 照片清晰度、動態模糊、紋理品質 |
 | 重疊幾何 | 估算矩形 footprint 的前向／旁向區間重疊 | 實際影像特徵點是否充足 |
 | 減量決策 | 哪些照片可列為 `SKIP` 候選 | 直接刪除原始檔的授權 |
-| 建模成果 | 無；`modeling_validation_status` 維持 `NOT_RUN` | 空三、點雲、DSM、正射成果品質 |
+| 建模成果 | CLI 不執行或匯入建模驗收；`modeling_validation_status` 維持 `NOT_RUN` | 空三、點雲、DSM、正射成果品質；另行人工測試不會自動改變此欄位 |
 
 > [!IMPORTANT]
 > `PASS` 代表 metadata 矩形幾何通過，不等於攝影測量建模品質通過。`SKIP` 只是候選清單，正式驗收前必須進行原始集與減量集的 A/B 建模。
+
+另已對 graded 50% 的 557 張做獨立 Metashape Low 可行性測試：483 張對齊、74 張未對齊，產生並核對非空模型，但存在兩個分離拍攝區、粗糙／平滑補面且未做正式貼圖。這不是完整品質驗證通過，亦不是 A/B。詳見[驗證紀錄](validation.md#metashape-feasibility-test--2026-10-12)。
 
 ## 2. 方法學證據鏈
 
@@ -166,8 +168,12 @@ flowchart TD
     Q -- 否 --> K[DSM_DATA_UNAVAILABLE<br/>保留]
     Q -- 是 --> M[Horn 坡度 + 視窗高差]
     M --> G{坡度 ≤ 門檻<br/>且高差 ≤ 門檻}
-    G -- 否 --> R[TERRAIN_CHANGE_PROTECTION<br/>保留]
-    G -- 是 --> P[GENTLE<br/>允許進入幾何篩選]
+    G -- 是 --> P[GENTLE]
+    G -- 否 --> H{graded 政策<br/>且坡度／高差皆未超硬上限}
+    H -- 否 --> R[TERRAIN_CHANGE_PROTECTION<br/>保留]
+    H -- 是 --> WARN[WARNING<br/>記錄地形警示]
+    P --> E[繼續其他幾何適格性檢查]
+    WARN --> E
 ```
 
 Horn 中心坡度使用：
@@ -195,6 +201,18 @@ $$
 
 本次中度設定為坡度 `≤ 15°`、3×3 高差 `≤ 20 m`。兩項必須同時通過才是 `GENTLE`。
 
+0.6.0 新增明示的 `terrain_policy = graded`。軟門檻仍為 15°／20 m；新試驗硬上限為 30°／40 m。分類如下，舊設定預設 `strict` 並保留原本行為：
+
+| 政策／分類 | 條件 | 行為 |
+|---|---|---|
+| `GENTLE` | 兩項均通過軟門檻 | 繼續其他檢查 |
+| graded 的 `WARNING` | 超出任一軟門檻，但兩項均未超硬上限 | 保留 `TERRAIN_WARNING` 記錄，允許篩選 |
+| graded 的 `ROUGH` | 超出任一硬上限 | 硬性保留 |
+| strict 的 `ROUGH` | 超出任一軟門檻 | 硬性保留 |
+| 缺值／範圍外 | 無法取得有效 DSM 或高程 | 保留 |
+
+WARNING 並沒有被改寫為平緩地形；它是此批資料明示放寬的試驗許可。局部平地 footprint 並未因此變成坡面投影，仍需建模驗證。
+
 ### 4.2 DSM 保護能與不能代表的範圍
 
 ```mermaid
@@ -211,7 +229,7 @@ flowchart LR
 flowchart TD
     A[單張照片] --> M{Metadata 掃描成功}
     M -- 否 --> K[BYPASS_KEEP]
-    M -- 是 --> D{DSM = GENTLE}
+    M -- 是 --> D{DSM = GENTLE<br/>或 graded 且 WARNING 在硬上限內}
     D -- 否 --> K
     D -- 是 --> G{Geoid = AVAILABLE}
     G -- 否 --> K
@@ -223,19 +241,21 @@ flowchart TD
     H -- 否 --> K
     H -- 是 --> C{相機 profile、尺寸、焦距有效}
     C -- 否 --> K
-    C -- 是 --> N{近垂直、yaw 與 orientation 可解釋}
+    C -- 是 --> N{pitch = -90°<br/>yaw 與 orientation 可解釋}
     N -- 否 --> K
     N -- 是 --> E[進入航帶與重疊率計算]
 ```
 
 | 保留原因 | 檢核意義 |
 |---|---|
-| `TERRAIN_CHANGE_PROTECTION` | DSM 局部地形超出門檻 |
+| `TERRAIN_CHANGE_PROTECTION` | strict 超出軟門檻，或 graded 超出硬上限 |
+| `TERRAIN_WARNING` | graded 中超出軟門檻但仍可繼續篩選；不是品質 PASS |
 | `DSM_DATA_UNAVAILABLE` | DSM 缺值、邊界或範圍外 |
 | `GEOID_DATA_UNAVAILABLE` | 無法安全取得 `N` |
 | `GPS_VERTICAL_REFERENCE_UNCONFIRMED` | 無法證明 GPS 高是橢球高 |
 | `HEIGHT_REFERENCE_UNCERTAIN` | 高程缺失或校正後 AGL 非正值 |
 | `NADIR_GEOMETRY_UNCERTAIN` | 相機不是可接受的近垂直姿態 |
+| `TILTED_FOOTPRINT_UNSUPPORTED` | 姿態在容差內但仍傾斜；完整姿態投影未支援，因此保留 |
 | `CAMERA_PROFILE_MISSING_OR_SIZE_MISMATCH` | 無法證實感光元件與影像尺寸 |
 | `FOCAL_LENGTH_INVALID` | 焦距無法用於 footprint |
 | `GPS_INVALID` / `CAPTURE_TIME_INVALID` | 空間或時間序列不可信 |
@@ -262,20 +282,29 @@ $$
 
 相機移動可沿影像長軸或短軸；程式依移動方位與 yaw 對齊關係決定何者是沿航向尺寸。斜向、航向不一致或橫向偏移過大時，不強行推估。
 
+0.5.1 只對 metadata pitch 為 `-90°` 的照片使用此模型；傾斜照片保留。對 yaw 不同的照片，以兩張照片相機主軸的共同方向為座標，使用保守內接矩形。設相對共同方向的角差為 `δ`、原尺寸為 `L,W`，則：
+
+$$
+k = \frac{1}{\cos\delta + \max(L/W,W/L)\,|\sin\delta|},
+\qquad L' = kL,\quad W' = kW
+$$
+
+此縮放使矩形四角都位於原本 yaw 旋轉後的 footprint 內。懸停時同樣先縮小，再使用較小尺寸與全位移距離。這仍是平地、未建模 roll 與畸變的近似。
+
 ### 6.2 一維區間重疊，不是面積重疊
 
 ```mermaid
 flowchart LR
-    A[Footprint A<br/>尺寸 L_A] --- I[交集長度 I]
-    I --- B[Footprint B<br/>尺寸 L_B]
+    A[內接 Footprint A<br/>尺寸 k_A × L_A] --- I[交集長度 I]
+    I --- B[內接 Footprint B<br/>尺寸 k_B × L_B]
     A -. 中心距 d .- B
     I --> O[重疊率 O = I / max L_A, L_B]
 ```
 
 $$
 I = \max\left(0,
-\min\left(\frac{L_A}{2}, d + \frac{L_B}{2}\right)
-- \max\left(-\frac{L_A}{2}, d - \frac{L_B}{2}\right)
+\min\left(\frac{L'_A}{2}, d + \frac{L'_B}{2}\right)
+- \max\left(-\frac{L'_A}{2}, d - \frac{L'_B}{2}\right)
 \right)
 $$
 
@@ -283,7 +312,7 @@ $$
 O = \frac{I}{\max(L_A,L_B)}
 $$
 
-以較大 footprint 為分母，可避免高度不同時用較小 footprint 產生過於樂觀的重疊率。這是區間幾何，不是像素級影像面積交集。
+交集使用共同方向的內接尺寸 `L'_A,L'_B`，分母仍使用未縮小的 `max(L_A,L_B)`；不會因縮小矩形而提高重疊率。以較大 footprint 為分母，可避免高度不同時用較小 footprint 產生過於樂觀的重疊率。這是區間幾何，不是像素級影像面積交集。
 
 ## 7. 前向重疊篩選
 
@@ -331,6 +360,8 @@ flowchart LR
 
 > [!NOTE]
 > `retained_link_status = FAIL` 不一定代表篩選造成缺口。若原始相鄰照片本來就低於門檻，程式不會跨過它略過照片，但仍會將原始缺口寫為 `ORIGINAL_LINK_GAP_OR_UNCERTAINTY`。
+
+只有原始序列也相鄰的失敗連結，才使用上述原始缺口原因。若兩張保留照片之間仍有 `SKIP`，失敗連結分類為 `RETAINED_LINK_GAP_OR_UNCERTAINTY` 並回補中間照片；完整篩選結束時不會留下這種減量引入的缺口。
 
 ## 8. 旁向航帶重疊與回補
 
@@ -381,6 +412,8 @@ flowchart TD
 
 回補只修復「減量造成」的伙伴消失。如果原始資料就無法找到合格伙伴，程式會誠實標記不確定，不會把它變成 PASS。
 
+0.5.1 使用共同相機主軸與內接矩形計算雙向一致的照片對幾何；航帶依身分固定排序，伙伴分數相同時以照片身分決定，因此反轉航帶處理順序不會改變結果。旁向回補後，若可變高度使新的相鄰保留連結低於前向門檻，會回補該區間的中間照片，再重新檢查旁向伙伴。流程只增加保留照片，直到不再需要回補才輸出最終狀態。
+
 ### 8.3 整體狀態與減量子集狀態
 
 ```mermaid
@@ -423,6 +456,7 @@ flowchart TD
 | `height_assumption` | 應明示 `h - N - config-declared TWVD2001 DSM` |
 | `dsm` / `geoid` | 檔名、SHA-256、CRS、解析度、基準、公式與限制 |
 | `dsm_status_counts` / `geoid_status_counts` | 格網可用性分布 |
+| `terrain_warning_*` | WARNING 總張數，以及最終保留／略過張數 |
 | `decision_counts` / `reason_counts` | 保留、略過與保護原因統計 |
 | `retained_link_counts` | 前向保留鏈 PASS／FAIL／UNKNOWN |
 | `cross_strip_*` | 旁向配對、回補、缺口、未配對與子集狀態 |
@@ -441,6 +475,8 @@ flowchart TD
 | 旁向結果鏈 | `cross_strip_status`, `cross_strip_partner_id`, `side_overlap`, `cross_strip_along_overlap`, `cross_strip_restored` |
 
 ## 10. 804 張實際成果檢核範例
+
+10.1–10.3 是 0.5.0 的歷史結果，10.4 是 0.5.1 的 strict 地形結果；最新 graded 政策比較見 10.5。不同版本與地形政策的清單不可混用。
 
 ### 10.1 資料與高程
 
@@ -493,6 +529,40 @@ flowchart LR
 
 這個差異說明高程基準不只影響報告數字，還會直接改變 footprint 與篩選決策。校正後的 footprint 較小，因此程式更保守地保留照片。
 
+### 10.4 0.5.1 修正後重新掃描 — 2026-10-12
+
+兩組皆使用原始 804 張、相同 DSM／Geoid、TWVD2001 校正與 15°／20 m 地形政策；60% 組同時將前向候選、前向最低與旁向最低門檻改為 60%。
+
+| 項目 | 修正後 70% | 修正後 60% |
+|---|---:|---:|
+| 保留照片 | 711 | 698 |
+| `SKIP` 候選 | 93 | 106 |
+| 張數減量 | 11.567% | 13.184% |
+| 候選減少容量 | 2,202,074,206 bytes | 2,504,185,556 bytes |
+| 前向 PASS | 53 | 44 |
+| 前向原始 FAIL | 4 | 0 |
+| 旁向 PASS 保留點 | 15 | 32 |
+| 旁向回補 | 2 | 3 |
+| 整體／減量子集旁向狀態 | `GAPS_OR_UNCERTAINTY` | `GAPS_OR_UNCERTAINTY` |
+
+傾斜模型保護另外保留 6 張照片。正反照片對與航帶順序一致性需以新幾何檢核；較少旁向 PASS 是修正估算後的結果，不能推論為影像品質下降。70% 的 4 個 FAIL 都是原始相鄰連結；60% 門檻下沒有前向 FAIL，但旁向與建模品質仍未完整證實。
+
+### 10.5 0.6.0 分級地形、50% 重疊 — 2026-10-12
+
+同組 804 張、相同逐張高程與姿態資料、同一 DSM／Geoid 重新掃描。strict 與 graded 的設定快照只有 `terrain_policy` 不同；硬上限 30°／40 m 在 strict 政策下不使用。
+
+| 項目 | strict 50% | graded 50% |
+|---|---:|---:|
+| 保留照片 | 690 | 557 |
+| `SKIP` 候選 | 114 | 247 |
+| 張數減量 | 14.179% | 30.721% |
+| 候選減少容量 | 2,699,578,552 bytes | 5,851,414,262 bytes |
+| GENTLE／WARNING／ROUGH | 281／0／521 | 281／322／199 |
+| WARNING 保留／略過 | 0／0 | 197／125 |
+| 前向 PASS／原始 FAIL | 36／0 | 74／1 |
+
+兩組另有 2 張 DSM 範圍外。新政策多略過 133 張；仍有 430 張由硬地形、姿態或資料缺失保護。graded 組的 `MAX_20269.JPG` 與其原始前一張估算前向重疊為 27.306%，該連結兩側均保留，並未跨越該原始缺口略過照片。旁向整體／減量子集仍為 `GAPS_OR_UNCERTAINTY`；WARNING 與此缺口是後續建模驗證重點。
+
 ## 11. 成果檢核流程
 
 ```mermaid
@@ -518,6 +588,7 @@ flowchart TD
 - [ ] `algorithm_version` 與指定版本一致。
 - [ ] `config_snapshot` 與核定參數一致，無臨時門檻覆寫。
 - [ ] DSM 與 Geoid 檔案 SHA-256 與交付清單一致。
+- [ ] 已核對 strict／graded 政策、軟／硬地形門檻與 `terrain_warning_*`，沒有把 WARNING 當作 GENTLE 或品質合格。
 - [ ] Geoid 的 target datum、offset convention、unit 與 point semantics 正確。
 - [ ] DSM 垂直基準來源文件已隨成果交付。
 - [ ] `raw = selected + skipped`，張數與 bytes 統計可由 Manifest 重算。
@@ -545,8 +616,9 @@ flowchart LR
 其他限制：
 
 - 不解碼照片像素，無影像特徵點與遮蔽分析。
-- 只對近垂直、移動方向可對齊影像主軸的照片進行矩形模型。
+- 只對 metadata pitch 為 -90°、移動方向可對齊影像主軸的照片進行矩形模型；未建模 roll 與鏡頭畸變。
 - DSM 只檢查 GPS 點周邊 3×3 網格，不是 footprint-wide terrain projection。
+- graded 放寬僅改變保留政策；WARNING 地形仍未經坡面投影或建模品質驗證。
 - 旁向配對是局部平面矩形近似，不是立體地形上的實際影像重疊。
 - 本工具不修改原始照片；預設只寫報告，只有明示 `--copy` 才複製保留檔。
 
@@ -555,6 +627,7 @@ flowchart LR
 - [專案驗證紀錄](validation.md)
 - [設計決策](design.md)
 - [校正後 XT701 中度 70% 設定](../config/xt701-dsm70-cross70-moderate-twvd2001.json)
+- [校正後 XT701 分級地形 50% 設定](../config/xt701-dsm50-cross50-graded-twvd2001.json)
 - [國土測繪中心：TWVD2001](https://www.nlsc.gov.tw/cp.aspx?n=1483)
 - [政府資料開放平臺：全台 20 m DSM](https://data.gov.tw/dataset/169808)
 - [QPS：TWHyGEO2014 pre-release redistribution](https://qpssoftware.scrollhelp.site/geodeticui/download-pre-released-vertical-models)

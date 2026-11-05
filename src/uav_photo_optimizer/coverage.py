@@ -3,7 +3,10 @@
 import math
 from dataclasses import dataclass
 
-from .geometry import angle, distance, footprint
+from .geometry import (
+    EPS, angle, common_axis, distance, footprint, frame_footprint,
+    frame_separation, interval_overlap,
+)
 
 
 @dataclass(frozen=True)
@@ -19,15 +22,6 @@ class SidePair:
     along_overlap: float
     cross_distance_m: float
     along_distance_m: float
-
-
-def interval_overlap(size_a, size_b, separation):
-    intersection = max(
-        0.0,
-        min(size_a / 2, separation + size_b / 2)
-        - max(-size_a / 2, separation - size_b / 2),
-    )
-    return max(0.0, min(1.0, intersection / max(size_a, size_b)))
 
 
 def axis_angle(a, b):
@@ -52,11 +46,6 @@ def strip_frame(strip, config):
     return StripFrame(strip[0].strip_id, track_bearing, offset % 180)
 
 
-def frame_dimensions(photo, frame, config):
-    along, cross = footprint(photo, config)
-    return (cross, along) if frame.image_axis_offset_deg == 90 else (along, cross)
-
-
 def side_pair(a, b, frame_a, frame_b, config):
     if frame_a is None or frame_b is None or frame_a.strip_id == frame_b.strip_id:
         return None
@@ -67,17 +56,22 @@ def side_pair(a, b, frame_a, frame_b, config):
     if (a.timestamp is None or b.timestamp is None
             or abs(a.timestamp - b.timestamp) > config.cross_strip_max_time_gap_seconds):
         return None
-    bearing, meters = distance(a, b)
-    theta = math.radians(bearing - frame_a.bearing_deg)
-    along_distance = abs(meters * math.cos(theta))
-    cross_distance = abs(meters * math.sin(theta))
+    if a.pitch is None or b.pitch is None or abs(a.pitch + 90) > EPS or abs(b.pitch + 90) > EPS:
+        return None
+    if a.yaw is None or b.yaw is None:
+        return None
+    bearing = common_axis(a.yaw + frame_a.image_axis_offset_deg, b.yaw + frame_b.image_axis_offset_deg)
+    core_a, core_b = frame_footprint(a, bearing, config), frame_footprint(b, bearing, config)
+    if core_a is None or core_b is None:
+        return None
+    along_distance, cross_distance = frame_separation(a, b, bearing)
     if cross_distance < config.cross_strip_min_separation_m:
         return None
-    along_a, cross_a = frame_dimensions(a, frame_a, config)
-    along_b, cross_b = frame_dimensions(b, frame_b, config)
+    along_a, cross_a, nominal_along_a, nominal_cross_a = core_a
+    along_b, cross_b, nominal_along_b, nominal_cross_b = core_b
     return SidePair(
-        interval_overlap(cross_a, cross_b, cross_distance),
-        interval_overlap(along_a, along_b, along_distance),
+        interval_overlap(cross_a, cross_b, cross_distance, max(nominal_cross_a, nominal_cross_b)),
+        interval_overlap(along_a, along_b, along_distance, max(nominal_along_a, nominal_along_b)),
         cross_distance,
         along_distance,
     )
@@ -131,11 +125,19 @@ def protect_cross_strip(strips, config, all_photos=None):
     if not config.cross_strip_enabled:
         return result
 
-    strips = [strip for strip in strips if strip]
+    strips = sorted((strip for strip in strips if strip), key=lambda strip: strip[0].strip_id)
     frames = {strip[0].strip_id: strip_frame(strip, config) for strip in strips}
     envelopes = {strip[0].strip_id: strip_envelope(strip, config) for strip in strips}
     photos = [photo for strip in strips for photo in strip]
     universe = photos if all_photos is None else all_photos
+    for photo in universe:
+        photo.cross_strip_status = "NOT_EVALUATED"
+        photo.cross_strip_partner_id = None
+        photo.side_overlap = None
+        photo.cross_strip_along_overlap = None
+        photo.reasons = [reason for reason in photo.reasons if reason not in (
+            "ORIGINAL_SIDE_GAP_OR_UNCERTAINTY", "CROSS_STRIP_PAIR_UNCERTAIN",
+        )]
     eligible_ids = {photo.photo_id for photo in photos}
     not_evaluated_count = sum(
         photo.decision != "SKIP" and photo.photo_id not in eligible_ids
@@ -163,7 +165,6 @@ def protect_cross_strip(strips, config, all_photos=None):
 
     # Original side gaps stay explicit. Restore only when forward reduction
     # removed every otherwise-valid partner of a retained photo.
-    restored = set()
     changed = True
     while changed:
         changed = False
@@ -174,12 +175,11 @@ def protect_cross_strip(strips, config, all_photos=None):
                      if item[1].side_overlap + 1e-9 >= config.min_retained_side_overlap]
             if not valid or any(partner.decision != "SKIP" for partner, _ in valid):
                 continue
-            partner, _ = max(valid, key=lambda item: (item[1].side_overlap, item[1].along_overlap))
+            partner, _ = max(valid, key=lambda item: (item[1].side_overlap, item[1].along_overlap, item[0].photo_id))
             partner.decision = "KEEP"
             partner.restored = True
             partner.cross_strip_restored = True
             partner.reasons.append("CROSS_STRIP_LINK_PROTECTION")
-            restored.add(partner.photo_id)
             changed = True
 
     links = set()
@@ -191,7 +191,7 @@ def protect_cross_strip(strips, config, all_photos=None):
                  if partner.decision != "SKIP"
                  and pair.side_overlap + 1e-9 >= config.min_retained_side_overlap]
         if valid:
-            partner, pair = max(valid, key=lambda item: (item[1].side_overlap, item[1].along_overlap))
+            partner, pair = max(valid, key=lambda item: (item[1].side_overlap, item[1].along_overlap, item[0].photo_id))
             photo.cross_strip_status = "PASS"
             photo.cross_strip_partner_id = partner.photo_id
             photo.side_overlap = pair.side_overlap
@@ -218,7 +218,7 @@ def protect_cross_strip(strips, config, all_photos=None):
     result.update(
         side_overlap_status="PASS" if pass_count and not gap_count and not unpaired_count and not not_evaluated_count else "GAPS_OR_UNCERTAINTY",
         cross_strip_evaluated_link_count=len(links),
-        cross_strip_restored_photo_count=len(restored),
+        cross_strip_restored_photo_count=sum(photo.cross_strip_restored for photo in photos),
         cross_strip_pass_photo_count=pass_count,
         cross_strip_original_gap_count=gap_count,
         cross_strip_unpaired_photo_count=unpaired_count,

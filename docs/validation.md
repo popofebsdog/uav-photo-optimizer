@@ -8,7 +8,7 @@ Covered: exact OR thresholds, 80% dense-strip selection, 60% override, A/B/C res
 
 Version 0.2.0 additionally covers projected DSM validation and masking, Horn slope/relief, rough/missing terrain protection, explicit GPS-minus-DSM estimates, GPS-height-change protection, 70% selection, sideways flight, hover noise and last-safe-candidate restoration.
 
-Current release result: 52 tests passed, including repeated-mission isolation, global false-PASS prevention, conservative spatial pruning, cross-strip restoration, asymmetric geoid interpolation, converter orientation, pinned hashes, datum/GPS-height-reference validation and fail-closed behavior, ExifTool timeout and vendor-field normalization tests.
+Current release result: 69 tests passed, covering the prior selection, copy, datum, pose and restoration protections, plus explicit strict/graded terrain configuration, invalid/inverted ceilings, warning admission, hard-limit boundaries, missing metrics/data, unsupported pose, confirmed corrected-height requirements, raster classification and warning report counts.
 
 Synthetic geometry tests are deterministic; they do not establish real photogrammetric quality.
 
@@ -101,3 +101,76 @@ Version 0.5.0 adds `gps_geoid_dsm`: `H = h - N`, followed by `AGL = H - H_DSM`. 
 - Report-only output is under `outputs/dsm70-cross70-moderate-twvd2001-005/`; no copy was requested and source photos were unchanged.
 
 This removes the known ellipsoidal-versus-orthometric subtraction error. It still does not provide image matching, footprint-wide terrain/occlusion projection or Metashape A/B quality validation, so `SKIP` remains a modeling candidate rather than permission to delete originals.
+
+## Geometry/restoration corrections — 2026-10-12
+
+Version 0.5.1 retains tilted photos, uses common-axis inscribed rectangles for yaw differences, makes side-pair geometry and restoration order deterministic, and repairs forward links after side restoration. Eight new regression tests were observed failing before the corresponding implementation changes; all 60 tests now pass.
+
+The same source photos were scanned again with ExifTool 13.55 and the same DSM/geoid hashes. Source sizes, modification times and the sampled input metadata/heights match the prior 0.5.0 manifest. Reports remain report-only:
+
+| Report | 70% forward/side | 60% forward/side |
+|---|---:|---:|
+| Input photos | 804 | 804 |
+| Selected photos | 711 | 698 |
+| SKIP candidates | 93 | 106 |
+| Skippable bytes | 2,202,074,206 | 2,504,185,556 |
+| Count reduction | 11.567% | 13.184% |
+| Storage reduction | 9.772% | 11.112% |
+| Forward PASS / original FAIL | 53 / 4 | 44 / 0 |
+| Retained side PASS | 15 | 32 |
+| Side restorations | 2 | 3 |
+
+Final verified outputs: `outputs/dsm70-cross70-moderate-twvd2001-007-v051/` and `outputs/dsm60-cross60-moderate-twvd2001-002-v051/`. Earlier local 006/001 runs precede canonical unequal-size floating-point rounding and are superseded by these final reports. Six eligible-but-tilted photos are now bypass-retained. Both global and reduction-subset side states remain `GAPS_OR_UNCERTAINTY`.
+
+The old 0.5.0 side protection changed two selected identities when strip processing order was reversed. Both corrected runs produced identical final decisions, partner IDs, overlap values and counters for either processing order; every final side PASS was re-evaluated in both directions. Final non-passing forward links were verified to be original consecutive links, not skipped spans. Manifest count/byte/decision/restore statistics match the summary and selected list. A fixed-seed check of 1,000 yaw/axis cases verified that all inner-rectangle corners fit within their original footprint. These checks did not include Metashape modeling or source-photo copying; the later feasibility test is recorded below.
+
+## Graded terrain policy — 2026-10-12
+
+Version 0.6.0 makes the original terrain gate an explicit `strict` policy, and adds opt-in `graded` policy. The graded configuration keeps the original 15°/20 m gentle limits but permits WARNING terrain up to 30°/40 m hard ceilings. Above either hard ceiling, or with missing terrain/height evidence or unsupported pose, the photo remains retained. WARNING is never relabelled GENTLE.
+
+Fresh CLI scans used the same 804-photo dataset, 50% forward/side thresholds, ExifTool 13.55 and pinned DSM/geoid files:
+
+| Report | strict 50% | graded 50% |
+|---|---:|---:|
+| Selected / SKIP | 690 / 114 | 557 / 247 |
+| Skippable bytes | 2,699,578,552 | 5,851,414,262 |
+| Count / storage reduction | 14.179% / 11.979% | 30.721% / 25.965% |
+| GENTLE / WARNING / ROUGH / outside | 281 / 0 / 521 / 2 | 281 / 322 / 199 / 2 |
+| WARNING selected / skipped | 0 / 0 | 197 / 125 |
+| Bypass-retained | 628 | 430 |
+| Forward PASS / original FAIL | 36 / 0 | 74 / 1 |
+| Side PASS / restorations | 36 / 2 | 42 / 1 |
+
+Outputs: `outputs/dsm50-cross50-moderate-twvd2001-002-v060/` and `outputs/dsm50-cross50-graded-twvd2001-001-v060/`. The strict selected list is identical to the prior 0.5.1 50% result. Input metadata, source sizes/mtimes and sampled DSM/geoid/corrected heights were cross-checked unchanged; the config snapshots differ only in `terrain_policy`.
+
+Both outputs pass list/count/byte/warning-stat checks, hard-limit and pose protection checks, final forward-gap attribution, bidirectional side geometry and exact strip-order invariance. The newly admitted `MAX_20269.JPG` retained link has an original estimated overlap of 27.306%; its original predecessor remains retained, and no SKIP span crosses this gap. Both global and reduction-subset side states remain `GAPS_OR_UNCERTAINTY`.
+
+The 322 WARNING photos include 125 SKIP candidates, 73 eligible KEEP and 124 bypass-retained by the other protections. This policy removes 133 additional photos from the selected set overall, but does not claim verified terrain footprints, full coverage or model quality. No source files were copied or removed. The metadata scan itself does not run Metashape; the separate feasibility test follows.
+
+## Metashape feasibility test — 2026-10-12
+
+The graded 50% selected list was processed locally with Metashape Professional 2.2.0 build 19890, using its official `-r` Python interface in a separate process and a new document. The existing GUI project and original photos were not modified. The test directly referenced the 557 selected source photos rather than copying them. It is not a full-set or odd/even A/B comparison.
+
+| Stage | Settings / observed result |
+|---|---|
+| Matching | Low, downscale 4, 40,000 keypoints / 4,000 tiepoints; generic preselection on, reference preselection off |
+| References | Camera rotation references disabled; two zero-GPS location references disabled, with both photos still included |
+| Alignment | 483/557 cameras (86.7145%); 74 unaligned |
+| Valid tie points | 352,353; 1,068,423 valid projection observations |
+| Shared valid-track camera groups | 348 + 135; this is not a count of native Metashape components |
+| Sampled reprojection RMS | 5.41999 original-image pixels over 53,421 sampled observations; not a ground-distance or GCP accuracy metric |
+| Depth maps | Low, downscale 8 (8000×6000 images become 1000×750 depth maps), Mild filtering, up to 8 neighbors |
+| Mesh | Arbitrary surface from depth maps, enabled interpolation, target 200,000 faces; 201,725 faces / 101,631 vertices produced |
+| Appearance | Vertex colors only; no UV/photo texture generation |
+| Export | PLY, 5,366,755 bytes; native PSX project, native PDF report and PNG renders also saved locally |
+| Runtime | Final reconstruction attempt 2,101.9 seconds on M1 Pro / 16 GB RAM; excludes earlier script diagnosis |
+
+A separate read-only process reopened the saved PSX and checked camera, alignment, vertex and face counts, finite vertex coordinates, saved depth maps and the PLY header counts. All matched. Selected source sizes and modification times still matched the selection manifest. An independent code review identified this reload check as a required delivery gate; an in-memory non-empty mesh alone was not accepted as proof of persistence.
+
+The 135-camera group contains the 2026-07-31 batch and the 348-camera group contains the 2026-08-27 batch. Their mean photo GPS locations are approximately 20.1 km apart. Of the 74 unaligned photos, 69 belong to the 2026-07-29 batch and five to 2026-08-27. These observations explain the two spatially separated surfaces without establishing that reduction caused the alignment failures. Exact GPS coordinates and per-photo manifests are not published.
+
+Native close renders show localized detail mixed with broad smooth/interpolated regions and coarse surfaces. The reduced depth resolution, limited mesh and absence of photo textures constrain appearance; texturing alone would not repair missing or incorrect geometry. The test has not passed coverage or survey-quality acceptance.
+
+Two earlier script attempts failed before the final run: concurrent progress callbacks shared an unlocked temporary file, and the first PSX Save As invalidated the held chunk reference. Locking progress writes and re-fetching `document.chunk` fixed these issues, each with a failing-then-passing regression test. These two tests and hardcoded local modeling scripts remain under ignored `.Codex/`, not in the public package test suite. Their failures are not attributed to source image quality.
+
+**Outcome: partial low-resolution reconstruction completed, not quality validation passed.** The CLI's `modeling_validation_status` remains `NOT_RUN`: it does not invoke Metashape or ingest an external model-quality verdict. Full 804-photo / selected-photo A/B, successful 402-photo odd/even comparison, high-resolution texture quality, footprint-wide coverage and survey accuracy remain unverified. Photos, DSM/geoid rasters, precise-location reports and large reconstruction assets stay local under ignored paths.

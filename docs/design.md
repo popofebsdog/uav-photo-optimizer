@@ -1,4 +1,4 @@
-# Design decisions — 0.5.0
+# Design decisions — 0.6.0
 
 Source specification: parent-folder UDAS VibePrompt and section 71 of the modeling-link supplement. User approved an independent local tool and a configurable initial minimum retained forward overlap of 80%.
 
@@ -32,6 +32,19 @@ Source specification: parent-folder UDAS VibePrompt and section 71 of the modeli
 19. A geoid GeoTIFF is accepted only when its full-file SHA-256 matches the config and its tags explicitly identify TWVD2001, metre units, `N = h - H`, point-pixel semantics and source provenance. Grid mismatch is a run error; per-photo missing/outside values, unconfirmed ellipsoidal GPS-height semantics and non-positive AGL retain that photo.
 20. The DSM vertical datum is an explicit config declaration because the supplied GeoTIFF has no encoded vertical CRS. The report records that limitation, both raster hashes, the redistributed archive hash, source URL and applied formula.
 21. The included converter targets QPS's public pre-release redistribution and does not claim that file is the official NLSC original. Its LLDLLD grid is written as a north-up EPSG:3824 point grid without altering values.
+
+## Geometry and restoration corrections
+
+22. Tilted photos are retained even within the legacy near-nadir tolerance. Only metadata pitch of -90° (floating-point epsilon) is eligible until full pose projection is supported; roll and lens distortion are not modeled.
+23. Photo pairs use a symmetric common camera-axis direction. Yaw differences uniformly shrink each rectangle until its corners fit in the original rotated footprint; the original nominal dimensions remain the overlap denominator. Hover geometry uses the same shrinkage and full displacement on both axes.
+24. Strip iteration is sorted by stable strip identity, and equal-score partners are selected by photo identity. Pair separation uses a canonical geodesic direction, so reversing a pair or the strip processing order does not change its geometry or decisions.
+25. Side restoration and forward-link repair repeat until no additional forward photos are restored. Each step only changes SKIP to KEEP, guaranteeing termination. A failing non-consecutive retained link restores its original intermediate photos; only failing original consecutive links are classified as original gaps. Side statuses and restoration totals reflect the final retained set.
+
+## Opt-in graded terrain policy
+
+26. Existing configurations default to `terrain_policy=strict`; local terrain above the original gentle thresholds still bypasses reduction. The graded trial explicitly admits WARNING terrain up to separate hard slope/relief ceilings, without changing GENTLE classification or the sampled height.
+27. The included graded 50% trial uses 15°/20 m gentle limits and 30°/40 m hard ceilings. Either hard-limit violation remains ROUGH and retained; missing samples, invalid corrected heights and unsupported pose remain protected. Hard ceilings cannot be below gentle limits.
+28. WARNING is an experimental permission to continue the other geometry checks, not a claim of a flat surface or model quality. Manifest reasons and Summary warning selected/skipped counts preserve this distinction; the same local flat-plane approximation and its terrain/occlusion limitations still apply.
 
 ## Upstream documentation
 

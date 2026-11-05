@@ -59,7 +59,13 @@ def apply_dsm(photos, path: Path, config):
             p.dsm_surface_height_m = float(values[1, 1])
             p.dsm_slope_deg = slope
             p.dsm_relief_m = relief
-            p.dsm_status = "GENTLE" if slope <= config.terrain_max_slope_deg and relief <= config.terrain_max_relief_m else "ROUGH"
+            if slope <= config.terrain_max_slope_deg and relief <= config.terrain_max_relief_m:
+                p.dsm_status = "GENTLE"
+            elif (config.terrain_policy == "graded" and slope <= config.terrain_hard_max_slope_deg
+                    and relief <= config.terrain_hard_max_relief_m):
+                p.dsm_status = "WARNING"
+            else:
+                p.dsm_status = "ROUGH"
         uses_height_difference = config.height_mode in ("gps_minus_dsm_trial", "gps_geoid_dsm")
         corrected_height = config.height_mode == "gps_geoid_dsm"
         info = {
@@ -72,6 +78,8 @@ def apply_dsm(photos, path: Path, config):
             "usage": "LOCAL_TERRAIN_GATE_AND_TWVD2001_AGL_HEIGHT" if corrected_height else ("LOCAL_TERRAIN_GATE_AND_EXPERIMENTAL_GPS_MINUS_DSM_HEIGHT" if uses_height_difference else "LOCAL_TERRAIN_GATE_ONLY"),
             "height_formula": "GPSAltitude - geoid_undulation - DSM_center_elevation" if corrected_height else ("GPSAltitude - DSM_center_elevation" if uses_height_difference else None),
             "window_cells": [3, 3],
+            "terrain_policy": config.terrain_policy,
+            "warning_note": "WARNING terrain may be reduced with explicit risk; no terrain-projected footprint or model-quality validation" if config.terrain_policy == "graded" else None,
             "limitation": "Local neighborhood classification, not full footprint terrain projection or occlusion validation",
         }
     after = path.stat()

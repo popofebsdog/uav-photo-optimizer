@@ -1,18 +1,45 @@
+import json
+import subprocess
 import tempfile
 import unittest
+from dataclasses import replace
 from pathlib import Path
+from unittest.mock import patch
 
 import numpy as np
 import rasterio
 from rasterio.transform import from_origin
 
 from uav_photo_optimizer.config import Config
+from uav_photo_optimizer.cli import main
 from uav_photo_optimizer.selection import select, overlap
 from uav_photo_optimizer.terrain import apply_dsm, terrain_metrics
 from test_optimizer import config, photo
 
 
 class TrialTests(unittest.TestCase):
+    def test_terrain_policy_is_explicit_and_defaults_to_strict(self):
+        self.assertEqual(Config().snapshot().get("terrain_policy"), "strict")
+        graded = config(
+            terrain_policy="graded", terrain_max_slope_deg=15, terrain_max_relief_m=20,
+            terrain_hard_max_slope_deg=30, terrain_hard_max_relief_m=40,
+        )
+        self.assertEqual(graded.snapshot()["terrain_policy"], "graded")
+        self.assertEqual(graded.snapshot()["terrain_hard_max_slope_deg"], 30)
+
+    def test_graded_policy_rejects_invalid_or_inverted_limits(self):
+        for values in (
+            {"terrain_policy": "ignore"},
+            {"terrain_hard_max_slope_deg": float("nan")},
+            {"terrain_hard_max_relief_m": -1},
+            {"terrain_policy": "graded", "terrain_max_slope_deg": 35},
+            {"terrain_policy": "graded", "terrain_max_relief_m": 50},
+        ):
+            with self.subTest(values=values), self.assertRaises(ValueError):
+                config(**values)
+        # Unused graded ceilings do not alter existing strict configuration limits.
+        config(terrain_max_slope_deg=40, terrain_max_relief_m=50)
+
     def test_sideways_flight_uses_long_sensor_dimension(self):
         a, b = photo(0), photo(1, east=20)
         # 40/30*100=133.333m width, hence 85% overlap for 20m motion.
@@ -77,6 +104,64 @@ class TrialTests(unittest.TestCase):
             select(items, config(require_dsm=True), force=True)
             self.assertTrue(all(p.decision == "BYPASS_KEEP" for p in items))
 
+    def test_graded_warning_allows_reduction_with_explicit_warning(self):
+        items = [photo(i, i * 5) for i in range(9)]
+        for p in items:
+            p.dsm_status, p.dsm_slope_deg, p.dsm_relief_m = "WARNING", 25, 30
+        select(items, config(require_dsm=True, terrain_policy="graded"), force=True)
+        self.assertEqual(sum(p.decision == "SKIP" for p in items), 6)
+        self.assertTrue(all("TERRAIN_WARNING" in p.reasons for p in items))
+
+    def test_graded_hard_limits_and_missing_metrics_still_protect(self):
+        for slope, relief, allowed in ((30, 40, True), (30.001, 40, False), (30, 40.001, False), (None, 30, False)):
+            with self.subTest(slope=slope, relief=relief):
+                items = [photo(i, i * 5) for i in range(9)]
+                for p in items:
+                    p.dsm_status, p.dsm_slope_deg, p.dsm_relief_m = "WARNING", slope, relief
+                select(items, config(require_dsm=True, terrain_policy="graded"), force=True)
+                self.assertEqual(any(p.decision == "SKIP" for p in items), allowed)
+
+    def test_warning_does_not_bypass_pose_or_missing_dsm_protections(self):
+        for pitch, status in ((-89.99, "WARNING"), (-90, "NO_DATA"), (-90, "OUTSIDE_OR_EDGE")):
+            items = [photo(i, i * 5) for i in range(9)]
+            for p in items:
+                p.dsm_status, p.dsm_slope_deg, p.dsm_relief_m, p.pitch = status, 25, 30, pitch
+            select(items, config(require_dsm=True, terrain_policy="graded"), force=True)
+            self.assertTrue(all(p.decision == "BYPASS_KEEP" for p in items))
+
+    def test_strict_policy_does_not_accept_warning_terrain(self):
+        items = [photo(i, i * 5) for i in range(9)]
+        for p in items:
+            p.dsm_status, p.dsm_slope_deg, p.dsm_relief_m = "WARNING", 25, 30
+        select(items, config(require_dsm=True), force=True)
+        self.assertTrue(all(p.decision == "BYPASS_KEEP" for p in items))
+
+    def test_warning_still_requires_confirmed_corrected_height(self):
+        cfg = config(
+            require_dsm=True, terrain_policy="graded", height_mode="gps_geoid_dsm",
+            dsm_vertical_datum="TWVD2001", geoid_sha256="0" * 64,
+        )
+        for defect, reason in ((None, None), ("geoid", "GEOID_DATA_UNAVAILABLE"),
+                               ("datum", "GPS_VERTICAL_REFERENCE_UNCONFIRMED"),
+                               ("height", "HEIGHT_REFERENCE_UNCERTAIN")):
+            items = [photo(i, i * 5) for i in range(9)]
+            for p in items:
+                p.agl_m = None
+                p.dsm_status, p.dsm_slope_deg, p.dsm_relief_m = "WARNING", 25, 30
+                p.dsm_surface_height_m, p.absolute_altitude, p.geoid_undulation_m = 100, 180, 23
+                p.geoid_status, p.vendor_vertical_reference = "AVAILABLE", "ellipsoidal"
+                if defect == "geoid":
+                    p.geoid_status = "NO_DATA"
+                elif defect == "datum":
+                    p.vendor_vertical_reference = "orthometric"
+                elif defect == "height":
+                    p.absolute_altitude = None
+            select(items, cfg, force=True)
+            if reason:
+                self.assertTrue(all(p.decision == "BYPASS_KEEP" and reason in p.reasons for p in items))
+            else:
+                self.assertTrue(any(p.decision == "SKIP" for p in items))
+
     def test_last_safe_candidate_restoration(self):
         items = [photo(i, distance) for i, distance in enumerate([0, 5, 10, 15, 21])]
         select(items, config(), force=True)
@@ -106,6 +191,66 @@ class TrialTests(unittest.TestCase):
 
 
 class DSMTests(unittest.TestCase):
+    def test_cli_reports_warning_selected_and_skipped_counts(self):
+        from pyproj import Transformer
+        with tempfile.TemporaryDirectory() as directory:
+            task = Path(directory).resolve()
+            source = task / "input"
+            source.mkdir()
+            records = []
+            for i in range(9):
+                image_path = source / f"{i}.jpg"
+                image_path.write_bytes(b"fixture")
+                p = photo(i, i * 5)
+                records.append({"SourceFile": str(image_path), "Model": "TEST", "FocalLength": 30,
+                                "DateTimeOriginal": f"2026:10:12 10:00:{i * 2:02d}",
+                                "GPSLatitude": p.latitude, "GPSLongitude": p.longitude,
+                                "ImageWidth": 4000, "ImageHeight": 3000,
+                                "GimbalPitchDegree": -90, "GimbalYawDegree": 0})
+            heights = task / "heights.csv"
+            heights.write_text("relative_path,agl_m,source\n" + "".join(f"{i}.jpg,100,synthetic fixture\n" for i in range(9)))
+            config_path = task / "config.json"
+            config_path.write_text(json.dumps(config(require_dsm=True, terrain_policy="graded").snapshot()))
+            x, y = Transformer.from_crs(4326, 3857, always_xy=True).transform(121, 24)
+            dsm_path = task / "slope.tif"
+            with rasterio.open(dsm_path, "w", driver="GTiff", width=7, height=7, count=1,
+                               dtype="float32", crs="EPSG:3857", transform=from_origin(x - 70, y + 70, 20, 20)) as ds:
+                ds.write(np.tile(np.arange(7, dtype="float32") * 8 + 100, (7, 1)), 1)
+            replies = [subprocess.CompletedProcess([], 0, "13.55\n", ""),
+                       subprocess.CompletedProcess([], 0, json.dumps(records), "")]
+            output = task / "output"
+            with patch("uav_photo_optimizer.metadata.shutil.which", return_value="exiftool"), \
+                    patch("uav_photo_optimizer.metadata.subprocess.run", side_effect=replies):
+                result = main([str(source), "--config", str(config_path), "--dsm", str(dsm_path),
+                               "--heights", str(heights), "--output", str(output), "--force"])
+            self.assertEqual(result, 0)
+            summary = json.loads((output / "summary.json").read_text())
+            self.assertEqual(summary["dsm_status_counts"], {"WARNING": 9})
+            self.assertEqual(summary.get("terrain_warning_photo_count"), 9)
+            self.assertEqual(summary.get("terrain_warning_selected_photo_count"), 3)
+            self.assertEqual(summary.get("terrain_warning_skipped_photo_count"), 6)
+
+    def test_dsm_graded_classification_keeps_warning_distinct_from_gentle(self):
+        from pyproj import Transformer
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "slope.tif"
+            values = np.tile(np.arange(7, dtype="float32") * 8 + 100, (7, 1))
+            with rasterio.open(path, "w", driver="GTiff", width=7, height=7, count=1,
+                               dtype="float32", crs="EPSG:3857", transform=from_origin(0, 140, 20, 20)) as ds:
+                ds.write(values, 1)
+            to_gps = Transformer.from_crs(3857, 4326, always_xy=True)
+            cfg = config(require_dsm=True, terrain_max_slope_deg=15, terrain_max_relief_m=20,
+                         terrain_policy="graded")
+            for policy, expected in (("graded", "WARNING"), ("strict", "ROUGH")):
+                p = photo(0)
+                p.longitude, p.latitude = to_gps.transform(90, 50)
+                info = apply_dsm([p], path, replace(cfg, terrain_policy=policy))
+                self.assertEqual(p.dsm_status, expected)
+                self.assertAlmostEqual(p.dsm_slope_deg, 21.80140948635181)
+                self.assertEqual(p.dsm_relief_m, 16)
+                self.assertEqual(p.dsm_surface_height_m, 132)
+                self.assertEqual(info.get("terrain_policy"), policy)
+
     def test_flat_and_planar_slope(self):
         self.assertEqual(terrain_metrics(np.ones((3, 3)), 20, 20), (0, 0))
         z = np.array([[0, 20, 40]] * 3)

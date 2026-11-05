@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.6.0 — 2026-11-06
+
+- Adds opt-in graded DSM terrain policy: gentle limits remain explicit, intermediate terrain is WARNING, and separate hard slope/relief ceilings still retain extreme terrain.
+- Preserves strict behavior for all existing configurations; adds a graded 50% forward/side TWVD2001 trial configuration with 15°/20 m gentle and 30°/40 m hard limits.
+- Keeps missing-data, geoid/datum/height, pose and forward/side restoration protections unchanged.
+- Reports terrain warnings separately from gentle terrain, with warning selected/skipped counts and an explicit unverified-terrain note.
+- Documents the actual Metashape 2.2 Low-resolution feasibility test: 483/557 cameras aligned and a saved non-empty mesh, with disconnected shared-track groups, no photo texture, incomplete alignment and no A/B accuracy validation.
+
+## 0.5.1 — 2026-10-12
+
+- Retains tilted photos instead of applying a centered nadir footprint without full pose projection.
+- Measures forward and side overlap in a symmetric common camera-axis frame, using inscribed rectangles and unchanged nominal denominators for yaw differences.
+- Makes cross-strip restoration deterministic by strip and partner identity.
+- Repeats side protection and forward-link repair until no additional photos need restoration; classifies only original consecutive failures as original gaps.
+- Adds a TWVD2001-corrected 60% forward/side configuration and regression cases for yaw, tilt, ordering, hover, variable heights and gap attribution.
+
 ## 0.5.0 — 2026-09-15
 
 - Added strict TWHyGEO2014 geoid-grid sampling and `GPS ellipsoidal height - N - TWVD2001 DSM` geometry height.

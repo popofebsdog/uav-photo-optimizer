@@ -1,10 +1,11 @@
-"""Near-nadir strip geometry and conservative, linear-time interval restoration."""
-
-import math
+"""Nadir strip geometry and conservative forward/side restoration."""
 
 from .coverage import protect_cross_strip
 from .config import Config
-from .geometry import EPS, GEOD, angle, distance, footprint, geometry_height
+from .geometry import (
+    EPS, GEOD, angle, common_axis, distance, frame_footprint,
+    frame_separation, geometry_height, interval_overlap,
+)
 from .metadata import Photo
 
 
@@ -12,6 +13,8 @@ def prepare(photos, config):
     """Normalize configured angles and trial heights without fabricating AGL."""
     groups = {}
     for p in photos:
+        if p.dsm_status == "WARNING" and config.terrain_policy == "graded" and "TERRAIN_WARNING" not in p.reasons:
+            p.reasons.append("TERRAIN_WARNING")
         profile = config.camera_profiles.get(p.model, {})
         if profile.get("angle_convention") == "autel_positive_down":
             if p.pitch is None and p.vendor_pitch is not None:
@@ -58,7 +61,15 @@ def eligibility(p: Photo, config: Config) -> str | None:
     if config.require_dsm or p.dsm_status != "NOT_REQUESTED":
         if p.dsm_status == "ROUGH":
             return "TERRAIN_CHANGE_PROTECTION"
-        if p.dsm_status != "GENTLE":
+        if p.dsm_status == "WARNING":
+            if config.terrain_policy != "graded":
+                return "TERRAIN_CHANGE_PROTECTION"
+            if p.dsm_slope_deg is None or p.dsm_relief_m is None:
+                return "DSM_DATA_UNAVAILABLE"
+            if not (0 <= p.dsm_slope_deg <= config.terrain_hard_max_slope_deg
+                    and 0 <= p.dsm_relief_m <= config.terrain_hard_max_relief_m):
+                return "TERRAIN_CHANGE_PROTECTION"
+        elif p.dsm_status != "GENTLE":
             return "DSM_DATA_UNAVAILABLE"
     if config.height_mode == "gps_geoid_dsm" and p.geoid_status != "AVAILABLE":
         return "GEOID_DATA_UNAVAILABLE"
@@ -80,6 +91,9 @@ def eligibility(p: Photo, config: Config) -> str | None:
         return "FOCAL_LENGTH_INVALID"
     if p.pitch is None or abs(p.pitch + 90) > config.max_nadir_deviation_deg:
         return "NADIR_GEOMETRY_UNCERTAIN"
+    if abs(p.pitch + 90) > EPS:
+        # Tilted footprints require full pose projection; retain until supported.
+        return "TILTED_FOOTPRINT_UNSUPPORTED"
     if p.yaw is None or p.orientation not in (None, 1):
         return "CAMERA_ORIENTATION_UNCERTAIN"
     return None
@@ -101,13 +115,16 @@ def overlap(a: Photo, b: Photo, config: Config) -> float | None:
     if angle(a.yaw, b.yaw) > config.max_heading_change_deg:
         return None
     bearing, meters = distance(a, b)
-    length_a, width_a = footprint(a, config)
-    length_b, width_b = footprint(b, config)
     if meters < config.min_track_distance_m:
         # GPS direction is unstable while hovering. Use smaller footprint and
         # full distance on both axes, conservatively, rather than a noisy bearing.
-        length_a = width_a = min(length_a, width_a)
-        length_b = width_b = min(length_b, width_b)
+        frame = common_axis(a.yaw, b.yaw)
+        core_a, core_b = frame_footprint(a, frame, config), frame_footprint(b, frame, config)
+        if core_a is None or core_b is None:
+            return None
+        length_a = width_a = min(core_a[:2])
+        length_b = width_b = min(core_b[:2])
+        nominal_a, nominal_b = min(core_a[2:]), min(core_b[2:])
         along = cross = meters
     else:
         axes = []
@@ -119,16 +136,16 @@ def overlap(a: Photo, b: Photo, config: Config) -> float | None:
             axes.append(offset % 180)
         if axes[0] != axes[1]:
             return None
-        if axes[0] == 90:
-            length_a, width_a = width_a, length_a
-            length_b, width_b = width_b, length_b
-        theta = math.radians(bearing - a.yaw - axes[0])
-        along = abs(meters * math.cos(theta))
-        cross = abs(meters * math.sin(theta))
+        frame = common_axis(a.yaw + axes[0], b.yaw + axes[1])
+        core_a, core_b = frame_footprint(a, frame, config), frame_footprint(b, frame, config)
+        if core_a is None or core_b is None:
+            return None
+        length_a, width_a, nominal_a, _ = core_a
+        length_b, width_b, nominal_b, _ = core_b
+        along, cross = frame_separation(a, b, frame)
     if cross > config.max_cross_track_ratio * min(width_a, width_b) + EPS:
         return None
-    intersection = max(0.0, min(length_a / 2, along + length_b / 2) - max(-length_a / 2, along - length_b / 2))
-    return max(0.0, min(1.0, intersection / max(length_a, length_b)))
+    return interval_overlap(length_a, length_b, along, max(nominal_a, nominal_b))
 
 
 def segment(photos: list[Photo], config: Config) -> list[list[Photo]]:
@@ -242,8 +259,12 @@ def evaluate_retained_links(strip: list[Photo], config: Config):
         p.previous_retained_id = None
         p.retained_overlap = None
         p.retained_link_status = "NOT_EVALUATED"
+        p.reasons = [reason for reason in p.reasons if reason not in (
+            "ORIGINAL_LINK_GAP_OR_UNCERTAINTY", "RETAINED_LINK_GAP_OR_UNCERTAINTY",
+        )]
     previous = None
-    for p in strip:
+    previous_index = None
+    for index, p in enumerate(strip):
         if p.decision == "SKIP":
             continue
         if previous:
@@ -251,9 +272,29 @@ def evaluate_retained_links(strip: list[Photo], config: Config):
             p.retained_overlap = overlap(previous, p, config)
             p.retained_link_status = "UNKNOWN" if p.retained_overlap is None else "PASS" if p.retained_overlap + EPS >= config.min_retained_forward_overlap else "FAIL"
             if p.retained_link_status != "PASS":
-                if "ORIGINAL_LINK_GAP_OR_UNCERTAINTY" not in p.reasons:
-                    p.reasons.append("ORIGINAL_LINK_GAP_OR_UNCERTAINTY")
+                reason = "ORIGINAL_LINK_GAP_OR_UNCERTAINTY" if index == previous_index + 1 else "RETAINED_LINK_GAP_OR_UNCERTAINTY"
+                p.reasons.append(reason)
         previous = p
+        previous_index = index
+
+
+def repair_retained_links(strips, config):
+    """Restore skipped intermediates of a failing link, leaving original gaps explicit."""
+    restored = False
+    for strip in strips:
+        retained_indices = [i for i, p in enumerate(strip) if p.decision != "SKIP"]
+        for start, end in zip(retained_indices, retained_indices[1:]):
+            if end == start + 1:
+                continue
+            value = overlap(strip[start], strip[end], config)
+            if value is not None and value + EPS >= config.min_retained_forward_overlap:
+                continue
+            for p in strip[start + 1:end]:
+                p.decision = "KEEP"
+                p.restored = True
+                p.reasons.append("RETAINED_LINK_PROTECTION")
+                restored = True
+    return restored
 
 
 def select(photos: list[Photo], config: Config, force=False):
@@ -269,8 +310,11 @@ def select(photos: list[Photo], config: Config, force=False):
     strips = segment(photos, config)
     for strip in strips:
         reduce_strip(strip, config)
-    coverage = protect_cross_strip(strips, config, photos)
-    if coverage["cross_strip_restored_photo_count"]:
-        for strip in strips:
-            evaluate_retained_links(strip, config)
+    while True:
+        coverage = protect_cross_strip(strips, config, photos)
+        if not repair_retained_links(strips, config):
+            break
+        # Newly restored forward photos also need their original side partners.
+    for strip in strips:
+        evaluate_retained_links(strip, config)
     return {"trigger_by_size": trigger_size, "trigger_by_count": trigger_count, "forced": force, "optimization_triggered": True, "strip_count": len(strips), **coverage}
